@@ -1,0 +1,21 @@
+.DS_Store
+.swiftpm/
+.build/
+outputs/
+work/
+
+# Local app data and databases should never be committed.
+*.sqlite
+*.sqlite-*
+*.db
+
+# Signing and provisioning material.
+*.cer
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# Local environment overrides.
+.env
+.env.*
