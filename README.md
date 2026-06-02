@@ -39,7 +39,19 @@ swift test
 swift build -c release --product Worklog
 ```
 
-## Package And Install
+## Download And Install
+
+Download the latest `Worklog.app.zip` from [GitHub Releases](https://github.com/0xIvan/WorkLog/releases/latest), unzip it, and move `Worklog.app` to `/Applications`.
+
+You can also install the latest release from Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/0xIvan/WorkLog/main/scripts/install-release.sh | bash
+```
+
+Release builds are ad hoc signed and not notarized. On first launch, macOS may require right-clicking `Worklog.app` and choosing `Open`.
+
+## Local Package And Install
 
 ```sh
 scripts/install-app.sh
@@ -54,6 +66,17 @@ WORKLOG_CODE_SIGN_IDENTITY="Your Identity Name" scripts/install-app.sh
 ```
 
 If no signing identity is found, the script uses ad hoc signing.
+
+## Releasing
+
+GitHub Releases are created automatically when a version tag is pushed:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow runs tests, packages `Worklog.app`, ad hoc signs it, zips it, writes a checksum, and uploads both files to the GitHub release.
 
 ## Defaults
 

@@ -5,10 +5,11 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${1:-release}"
 APP_NAME="Worklog"
 APP_DIR="$ROOT_DIR/outputs/$APP_NAME.app"
-EXECUTABLE_PATH="$ROOT_DIR/.build/arm64-apple-macosx/$CONFIGURATION/$APP_NAME"
 
 cd "$ROOT_DIR"
 swift build -c "$CONFIGURATION" --product "$APP_NAME"
+BUILD_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
+EXECUTABLE_PATH="$BUILD_DIR/$APP_NAME"
 
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
