@@ -49,7 +49,7 @@ You can also install the latest release from Terminal:
 curl -fsSL https://raw.githubusercontent.com/0xIvan/WorkLog/main/scripts/install-release.sh | bash
 ```
 
-Release builds are ad hoc signed and not notarized. On first launch, macOS may require right-clicking `Worklog.app` and choosing `Open`.
+Release notes indicate whether a build is notarized. The release workflow is configured for Developer ID signing and notarization once the required Apple secrets are added. Older ad hoc signed releases may require right-clicking `Worklog.app` and choosing `Open` on first launch.
 
 ## Local Package And Install
 
@@ -76,7 +76,29 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow runs tests, packages `Worklog.app`, ad hoc signs it, zips it, writes a checksum, and uploads both files to the GitHub release.
+After the required secrets are configured, the release workflow runs tests, packages `Worklog.app`, Developer ID signs it, submits it to Apple's notary service, staples the notarization ticket, zips it, writes a checksum, and uploads both files to the GitHub release.
+
+### Release Secrets
+
+Notarized GitHub releases require these repository secrets:
+
+```text
+APPLE_CERTIFICATE_BASE64
+APPLE_CERTIFICATE_PASSWORD
+APPLE_ID
+APPLE_TEAM_ID
+APPLE_APP_SPECIFIC_PASSWORD
+```
+
+`APPLE_CERTIFICATE_BASE64` must be a base64-encoded `.p12` export of a Developer ID Application certificate:
+
+```sh
+base64 -i DeveloperIDApplication.p12 | pbcopy
+```
+
+`APPLE_APP_SPECIFIC_PASSWORD` is an app-specific password for the Apple ID used with the notary service.
+
+If any release secret is missing, tag-triggered release builds fail instead of publishing an unnotarized app.
 
 ## Defaults
 

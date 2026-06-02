@@ -23,10 +23,75 @@ jobs:
       - name: Package app
         run: scripts/package-app.sh release
 
-      - name: Sign app
-        run: codesign --force --deep --sign - outputs/Worklog.app
+      - name: Validate signing secrets
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          missing=()
 
-      - name: Create archive
+          [[ -n "$APPLE_CERTIFICATE_BASE64" ]] || missing+=("APPLE_CERTIFICATE_BASE64")
+          [[ -n "$APPLE_CERTIFICATE_PASSWORD" ]] || missing+=("APPLE_CERTIFICATE_PASSWORD")
+          [[ -n "$APPLE_ID" ]] || missing+=("APPLE_ID")
+          [[ -n "$APPLE_TEAM_ID" ]] || missing+=("APPLE_TEAM_ID")
+          [[ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]] || missing+=("APPLE_APP_SPECIFIC_PASSWORD")
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf 'Missing required release secret: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/worklog-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id-application.p12"
+
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          SIGNING_IDENTITY="$(
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+              | awk -F '"' '/Developer ID Application/ { print $2; exit }'
+          )"
+
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "No Developer ID Application identity found in imported certificate." >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" >&2
+            exit 1
+          fi
+
+          echo "WORKLOG_CODE_SIGN_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Sign and notarize app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: scripts/notarize-app.sh outputs/Worklog.app outputs/Worklog-notarization.zip
+
+      - name: Create release archive
         run: |
           ditto -c -k --sequesterRsrc --keepParent outputs/Worklog.app outputs/Worklog.app.zip
           shasum -a 256 outputs/Worklog.app.zip > outputs/Worklog.app.zip.sha256
@@ -44,7 +109,7 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/0xIvan/WorkLog/main/scripts/install-release.sh | bash
           ```
 
-          This release is ad hoc signed and not notarized. On first launch, macOS may require right-clicking `Worklog.app` and choosing `Open`.
+          This release is Developer ID signed and notarized.
           EOF
 
       - name: Publish GitHub release
