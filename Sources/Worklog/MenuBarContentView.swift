@@ -8,6 +8,7 @@ struct MenuBarContentView: View {
     var openSettings: () -> Void = {}
 
     private let formatter = TimeFormatting()
+    private let contentWidth: CGFloat = 240
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -71,7 +72,7 @@ struct MenuBarContentView: View {
             }
         }
         .padding()
-        .frame(width: 320)
+        .frame(width: contentWidth)
     }
 
     private func closeMenu() {
