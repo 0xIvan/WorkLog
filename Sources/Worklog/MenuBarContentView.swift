@@ -5,7 +5,7 @@ import WorklogCore
 struct MenuBarContentView: View {
     @EnvironmentObject private var appState: AppState
 
-    var openDashboard: () -> Void = {}
+    var openSettings: () -> Void = {}
 
     private let formatter = TimeFormatting()
 
@@ -41,19 +41,25 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            Button {
-                closeMenu()
-                DispatchQueue.main.async {
-                    openDashboard()
+            HStack(spacing: 8) {
+                Button {
+                    closeMenu()
+                    DispatchQueue.main.async {
+                        openSettings()
+                    }
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                        .frame(maxWidth: .infinity)
                 }
-            } label: {
-                Label("Show app", systemImage: "macwindow")
-            }
+                .frame(maxWidth: .infinity)
 
-            Button {
-                NSApp.terminate(nil)
-            } label: {
-                Label("Quit Worklog", systemImage: "power")
+                Button {
+                    NSApp.terminate(nil)
+                } label: {
+                    Label("Quit Worklog", systemImage: "power")
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(maxWidth: .infinity)
             }
 
             if let errorMessage = appState.errorMessage {

@@ -37,8 +37,8 @@ final class StatusBarController: NSObject {
         popover.contentSize = NSSize(width: 320, height: 260)
         popover.contentViewController = NSHostingController(
             rootView: MenuBarContentView(
-                openDashboard: { [weak appState] in
-                    appState?.openDashboardWindow()
+                openSettings: { [weak appState] in
+                    appState?.openSettingsWindow()
                 }
             )
             .environmentObject(appState)
