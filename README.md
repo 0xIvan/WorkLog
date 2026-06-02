@@ -59,4 +59,6 @@ If no signing identity is found, the script uses ad hoc signing.
 
 The app ships with editable default categories and rules for common work, personal, review, and privacy cases. Users can add, remove, or edit rules, projects, categories, and ignore patterns in the app.
 
-No license has been selected yet.
+## License
+
+MIT
