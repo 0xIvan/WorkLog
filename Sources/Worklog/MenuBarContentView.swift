@@ -41,7 +41,7 @@ struct MenuBarContentView: View {
 
             Divider()
 
-            HStack(spacing: 8) {
+            VStack(spacing: 8) {
                 Button {
                     closeMenu()
                     DispatchQueue.main.async {
