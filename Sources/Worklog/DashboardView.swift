@@ -164,9 +164,6 @@ private struct RecentActivityTab: View {
                             HStack {
                                 Text(item.segment.appName)
                                     .font(.headline)
-                                Text(item.classification.kind.displayName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                                 if let projectName = item.projectName {
                                     Text(projectName)
                                         .font(.caption)
@@ -187,28 +184,50 @@ private struct RecentActivityTab: View {
                             Button {
                                 appState.updateSegmentClassification(item, as: .work)
                             } label: {
-                                Label("Work", systemImage: "briefcase")
+                                Label("Work", systemImage: symbol(for: .work))
                             }
 
                             Button {
                                 appState.updateSegmentClassification(item, as: .personal)
                             } label: {
-                                Label("Personal", systemImage: "person")
+                                Label("Personal", systemImage: symbol(for: .personal))
                             }
 
                             Button(role: .destructive) {
                                 appState.updateSegmentClassification(item, as: .ignored)
                             } label: {
-                                Label("Ignore", systemImage: "eye.slash")
+                                Label("Ignore", systemImage: symbol(for: .ignored))
                             }
                         } label: {
-                            Image(systemName: "ellipsis.circle")
+                            Label(categoryName(for: item), systemImage: symbol(for: item.classification.kind))
+                                .lineLimit(1)
                         }
                         .menuStyle(.button)
                     }
                     .padding(.vertical, 4)
                 }
             }
+        }
+    }
+
+    private func categoryName(for item: ClassifiedSegment) -> String {
+        guard let categoryName = item.categoryName, !categoryName.isEmpty else {
+            return item.classification.kind.displayName
+        }
+
+        return categoryName
+    }
+
+    private func symbol(for kind: ActivityKind) -> String {
+        switch kind {
+        case .work:
+            "briefcase"
+        case .personal:
+            "person"
+        case .review:
+            "questionmark.circle"
+        case .ignored:
+            "eye.slash"
         }
     }
 
