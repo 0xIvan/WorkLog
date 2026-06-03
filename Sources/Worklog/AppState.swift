@@ -173,13 +173,16 @@ final class AppState: ObservableObject {
         }
     }
 
-    func saveCategory(_ category: WorklogCore.Category) {
+    @discardableResult
+    func saveCategory(_ category: WorklogCore.Category) -> Bool {
         do {
             try store?.saveCategory(category)
             try refresh()
             errorMessage = nil
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -224,6 +227,10 @@ final class AppState: ObservableObject {
     }
 
     func updateSegmentClassification(_ segment: ClassifiedSegment, as kind: ActivityKind) {
+        guard kind != .review else {
+            return
+        }
+
         let categoryID = categories.first { $0.kind == kind }?.id
 
         do {

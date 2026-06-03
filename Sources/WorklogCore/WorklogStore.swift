@@ -224,8 +224,12 @@ public final class WorklogStore {
     public func saveCategory(_ category: Category) throws {
         try execute(
             """
-            INSERT OR REPLACE INTO categories (id, name, kind, color_hex)
+            INSERT INTO categories (id, name, kind, color_hex)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                kind = excluded.kind,
+                color_hex = excluded.color_hex
             """,
             bindings: [
                 .text(category.id.uuidString),
@@ -260,8 +264,12 @@ public final class WorklogStore {
     public func saveProject(_ project: Project) throws {
         try execute(
             """
-            INSERT OR REPLACE INTO projects (id, name, color_hex, is_archived)
+            INSERT INTO projects (id, name, color_hex, is_archived)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                color_hex = excluded.color_hex,
+                is_archived = excluded.is_archived
             """,
             bindings: [
                 .text(project.id.uuidString),

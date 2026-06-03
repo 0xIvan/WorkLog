@@ -308,6 +308,7 @@ private struct ProjectEditorRow: View {
                 Label("Save", systemImage: "checkmark")
             }
             .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
     }
@@ -340,6 +341,7 @@ struct CategoriesSettingsView: View {
 private struct CategoryEditorRow: View {
     @EnvironmentObject private var appState: AppState
     @State private var category: WorklogCore.Category
+    @State private var saved = false
 
     init(category: WorklogCore.Category) {
         _category = State(initialValue: category)
@@ -356,11 +358,18 @@ private struct CategoryEditorRow: View {
             .frame(width: 180)
             ColorInputView(colorHex: $category.colorHex)
             Button {
-                appState.saveCategory(category)
+                if appState.saveCategory(category) {
+                    saved = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        saved = false
+                    }
+                }
             } label: {
-                Label("Save", systemImage: "checkmark")
+                Label("Save", systemImage: saved ? "checkmark.circle.fill" : "checkmark")
             }
             .labelStyle(.iconOnly)
+            .foregroundStyle(saved ? Color.green : Color.primary)
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
     }
@@ -389,14 +398,6 @@ private struct ColorInputView: View {
             )
             .labelsHidden()
             .frame(width: 28)
-
-            RoundedRectangle(cornerRadius: 4)
-                .fill(color)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(.secondary.opacity(0.35))
-                )
-                .frame(width: 22, height: 22)
 
             TextField("Color", text: $colorHex)
                 .font(.body.monospaced())

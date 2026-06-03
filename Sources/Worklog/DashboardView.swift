@@ -196,12 +196,6 @@ private struct RecentActivityTab: View {
                                 Label("Personal", systemImage: "person")
                             }
 
-                            Button {
-                                appState.updateSegmentClassification(item, as: .review)
-                            } label: {
-                                Label("Review", systemImage: "questionmark.circle")
-                            }
-
                             Button(role: .destructive) {
                                 appState.updateSegmentClassification(item, as: .ignored)
                             } label: {

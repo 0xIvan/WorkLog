@@ -82,6 +82,38 @@ struct WorklogStoreTests {
         #expect(activitySegments.first?.classification.isManual == true)
     }
 
+    @Test
+    func saveCategoryKeepsExistingActivityAttached() throws {
+        let store = try makeStore()
+        let segment = segment(url: "https://example.com")
+
+        try store.save(
+            segment: segment,
+            classification: SegmentClassification(
+                segmentID: segment.id,
+                kind: .work,
+                categoryID: SeedData.workCategoryID,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+
+        try store.saveCategory(
+            Category(
+                id: SeedData.workCategoryID,
+                name: "Deep Work",
+                kind: .work,
+                colorHex: "#111111"
+            )
+        )
+
+        let activitySegments = try store.activitySegments(for: Date())
+
+        #expect(activitySegments.first?.classification.categoryID == SeedData.workCategoryID)
+        #expect(activitySegments.first?.categoryName == "Deep Work")
+    }
+
     private func makeStore() throws -> WorklogStore {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
