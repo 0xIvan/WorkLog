@@ -52,6 +52,36 @@ struct WorklogStoreTests {
         #expect(remainingReviewSegments.isEmpty)
     }
 
+    @Test
+    func activitySegmentsForDateReflectManualClassificationEdits() throws {
+        let store = try makeStore()
+        let segment = segment(url: "https://example.com")
+
+        try store.save(
+            segment: segment,
+            classification: SegmentClassification(
+                segmentID: segment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.overrideSegment(
+            id: segment.id,
+            kind: .personal,
+            projectID: nil,
+            categoryID: SeedData.personalCategoryID
+        )
+
+        let activitySegments = try store.activitySegments(for: Date())
+
+        #expect(activitySegments.count == 1)
+        #expect(activitySegments.first?.classification.kind == .personal)
+        #expect(activitySegments.first?.classification.isManual == true)
+    }
+
     private func makeStore() throws -> WorklogStore {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

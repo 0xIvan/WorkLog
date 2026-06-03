@@ -134,35 +134,87 @@ private struct ReviewTab: View {
 
 private struct RecentActivityTab: View {
     @EnvironmentObject private var appState: AppState
+    private let formatter = TimeFormatting()
 
     var body: some View {
-        List(appState.recentSegments) { item in
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(color(for: item.classification.kind))
-                    .frame(width: 10, height: 10)
+        VStack(alignment: .leading, spacing: 12) {
+            DatePicker(
+                "Date",
+                selection: Binding(
+                    get: { appState.activityDate },
+                    set: { appState.selectActivityDate($0) }
+                ),
+                displayedComponents: .date
+            )
+            .datePickerStyle(.compact)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(item.segment.appName)
-                            .font(.headline)
-                        if let projectName = item.projectName {
-                            Text(projectName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Text(item.segment.windowTitle.isEmpty ? item.classification.kind.displayName : item.segment.windowTitle)
+            List {
+                if appState.activitySegments.isEmpty {
+                    Text("No activity for this day")
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
 
-                Spacer()
+                ForEach(appState.activitySegments) { item in
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(color(for: item.classification.kind))
+                            .frame(width: 10, height: 10)
 
-                Text(TimeFormatting().compactDuration(item.segment.duration))
-                    .font(.subheadline.monospacedDigit())
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(item.segment.appName)
+                                    .font(.headline)
+                                Text(item.classification.kind.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let projectName = item.projectName {
+                                    Text(projectName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Text(item.segment.windowTitle.isEmpty ? item.classification.kind.displayName : item.segment.windowTitle)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Text(formatter.compactDuration(item.segment.duration))
+                            .font(.subheadline.monospacedDigit())
+
+                        Menu {
+                            Button {
+                                appState.updateSegmentClassification(item, as: .work)
+                            } label: {
+                                Label("Work", systemImage: "briefcase")
+                            }
+
+                            Button {
+                                appState.updateSegmentClassification(item, as: .personal)
+                            } label: {
+                                Label("Personal", systemImage: "person")
+                            }
+
+                            Button {
+                                appState.updateSegmentClassification(item, as: .review)
+                            } label: {
+                                Label("Review", systemImage: "questionmark.circle")
+                            }
+
+                            Button(role: .destructive) {
+                                appState.updateSegmentClassification(item, as: .ignored)
+                            } label: {
+                                Label("Ignore", systemImage: "eye.slash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .menuStyle(.button)
+                    }
+                    .padding(.vertical, 4)
+                }
             }
-            .padding(.vertical, 4)
         }
     }
 

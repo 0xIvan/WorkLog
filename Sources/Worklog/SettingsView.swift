@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WorklogCore
 
@@ -298,8 +299,7 @@ private struct ProjectEditorRow: View {
     var body: some View {
         HStack {
             TextField("Name", text: $project.name)
-            TextField("Color", text: $project.colorHex)
-                .frame(width: 110)
+            ColorInputView(colorHex: $project.colorHex)
             Toggle("Archived", isOn: $project.isArchived)
                 .frame(width: 120)
             Button {
@@ -354,8 +354,7 @@ private struct CategoryEditorRow: View {
                 }
             }
             .frame(width: 180)
-            TextField("Color", text: $category.colorHex)
-                .frame(width: 110)
+            ColorInputView(colorHex: $category.colorHex)
             Button {
                 appState.saveCategory(category)
             } label: {
@@ -364,6 +363,76 @@ private struct CategoryEditorRow: View {
             .labelStyle(.iconOnly)
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct ColorInputView: View {
+    @Binding var colorHex: String
+
+    private var color: Color {
+        Color(hex: colorHex) ?? .accentColor
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ColorPicker(
+                "Color",
+                selection: Binding(
+                    get: { color },
+                    set: { newColor in
+                        if let hex = newColor.hexString {
+                            colorHex = hex
+                        }
+                    }
+                ),
+                supportsOpacity: false
+            )
+            .labelsHidden()
+            .frame(width: 28)
+
+            RoundedRectangle(cornerRadius: 4)
+                .fill(color)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(.secondary.opacity(0.35))
+                )
+                .frame(width: 22, height: 22)
+
+            TextField("Color", text: $colorHex)
+                .font(.body.monospaced())
+                .frame(width: 94)
+        }
+    }
+}
+
+private extension Color {
+    init?(hex: String) {
+        var trimmedHex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedHex.hasPrefix("#") {
+            trimmedHex.removeFirst()
+        }
+
+        guard trimmedHex.count == 6, let value = UInt64(trimmedHex, radix: 16) else {
+            return nil
+        }
+
+        let red = Double((value >> 16) & 0xFF) / 255
+        let green = Double((value >> 8) & 0xFF) / 255
+        let blue = Double(value & 0xFF) / 255
+
+        self.init(red: red, green: green, blue: blue)
+    }
+
+    var hexString: String? {
+        guard let color = NSColor(self).usingColorSpace(.deviceRGB) else {
+            return nil
+        }
+
+        let red = Int(round(color.redComponent * 255))
+        let green = Int(round(color.greenComponent * 255))
+        let blue = Int(round(color.blueComponent * 255))
+
+        return String(format: "#%02X%02X%02X", red, green, blue)
     }
 }
 

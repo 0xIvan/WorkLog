@@ -13,6 +13,8 @@ final class AppState: ObservableObject {
     @Published var weekSummary: [WeekDaySummary] = []
     @Published var reviewSegments: [ClassifiedSegment] = []
     @Published var recentSegments: [ClassifiedSegment] = []
+    @Published var activityDate = Date()
+    @Published var activitySegments: [ClassifiedSegment] = []
     @Published var rules: [Rule] = []
     @Published var categories: [WorklogCore.Category] = []
     @Published var projects: [Project] = []
@@ -131,6 +133,7 @@ final class AppState: ObservableObject {
         todaySummary = try store.daySummary(for: Date())
         weekSummary = try store.weekSummary(containing: Date())
         reviewSegments = try store.reviewSegments(for: Date())
+        activitySegments = try store.activitySegments(for: activityDate)
         recentSegments = try store.recentSegments(limit: 20)
         accessibilityTrusted = reader.accessibilityIsTrusted()
     }
@@ -190,6 +193,11 @@ final class AppState: ObservableObject {
         }
     }
 
+    func selectActivityDate(_ date: Date) {
+        activityDate = date
+        reload()
+    }
+
     func classifySegment(_ segment: ClassifiedSegment, as kind: ActivityKind) {
         let categoryID = categories.first { $0.kind == kind }?.id
 
@@ -197,6 +205,28 @@ final class AppState: ObservableObject {
             try createRememberedRule(from: segment, kind: kind, categoryID: categoryID)
             try store?.reclassify(scope: .today)
 
+            if kind == .ignored {
+                try store?.ignoreSegment(id: segment.id)
+            } else {
+                try store?.overrideSegment(
+                    id: segment.id,
+                    kind: kind,
+                    projectID: segment.classification.projectID,
+                    categoryID: categoryID
+                )
+            }
+
+            try refresh()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func updateSegmentClassification(_ segment: ClassifiedSegment, as kind: ActivityKind) {
+        let categoryID = categories.first { $0.kind == kind }?.id
+
+        do {
             if kind == .ignored {
                 try store?.ignoreSegment(id: segment.id)
             } else {

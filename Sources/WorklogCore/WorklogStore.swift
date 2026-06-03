@@ -393,6 +393,15 @@ public final class WorklogStore {
             .filter { $0.classification.kind == .review }
     }
 
+    public func activitySegments(for date: Date) throws -> [ClassifiedSegment] {
+        let interval = dayInterval(for: date)
+
+        return try classifiedSegments(startingAt: interval.start, endingBefore: interval.end)
+            .sorted { first, second in
+                first.segment.startedAt > second.segment.startedAt
+            }
+    }
+
     public func recentSegments(limit: Int) throws -> [ClassifiedSegment] {
         try query(
             """
