@@ -291,6 +291,7 @@ struct ProjectsSettingsView: View {
 private struct ProjectEditorRow: View {
     @EnvironmentObject private var appState: AppState
     @State private var project: Project
+    @State private var autosaveTask: Task<Void, Never>?
 
     init(project: Project) {
         _project = State(initialValue: project)
@@ -302,15 +303,27 @@ private struct ProjectEditorRow: View {
             ColorInputView(colorHex: $project.colorHex)
             Toggle("Archived", isOn: $project.isArchived)
                 .frame(width: 120)
-            Button {
-                appState.saveProject(project)
-            } label: {
-                Label("Save", systemImage: "checkmark")
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
+        .onChange(of: project) { _, updatedProject in
+            scheduleAutosave(updatedProject)
+        }
+        .onDisappear {
+            autosaveTask?.cancel()
+            appState.saveProject(project)
+        }
+    }
+
+    private func scheduleAutosave(_ updatedProject: Project) {
+        autosaveTask?.cancel()
+        autosaveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            appState.saveProject(updatedProject)
+        }
     }
 }
 
@@ -341,7 +354,7 @@ struct CategoriesSettingsView: View {
 private struct CategoryEditorRow: View {
     @EnvironmentObject private var appState: AppState
     @State private var category: WorklogCore.Category
-    @State private var saved = false
+    @State private var autosaveTask: Task<Void, Never>?
 
     init(category: WorklogCore.Category) {
         _category = State(initialValue: category)
@@ -357,21 +370,27 @@ private struct CategoryEditorRow: View {
             }
             .frame(width: 180)
             ColorInputView(colorHex: $category.colorHex)
-            Button {
-                if appState.saveCategory(category) {
-                    saved = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                        saved = false
-                    }
-                }
-            } label: {
-                Label("Save", systemImage: saved ? "checkmark.circle.fill" : "checkmark")
-            }
-            .labelStyle(.iconOnly)
-            .foregroundStyle(saved ? Color.green : Color.primary)
-            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
+        .onChange(of: category) { _, updatedCategory in
+            scheduleAutosave(updatedCategory)
+        }
+        .onDisappear {
+            autosaveTask?.cancel()
+            appState.saveCategory(category)
+        }
+    }
+
+    private func scheduleAutosave(_ updatedCategory: WorklogCore.Category) {
+        autosaveTask?.cancel()
+        autosaveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            appState.saveCategory(updatedCategory)
+        }
     }
 }
 
