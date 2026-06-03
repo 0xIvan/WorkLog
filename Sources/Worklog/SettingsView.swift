@@ -383,7 +383,7 @@ private struct ColorInputView: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 14) {
             ColorPicker(
                 "Color",
                 selection: Binding(
@@ -397,7 +397,8 @@ private struct ColorInputView: View {
                 supportsOpacity: false
             )
             .labelsHidden()
-            .frame(width: 28)
+            .fixedSize()
+            .frame(width: 90, alignment: .leading)
 
             TextField("Color", text: $colorHex)
                 .font(.body.monospaced())
