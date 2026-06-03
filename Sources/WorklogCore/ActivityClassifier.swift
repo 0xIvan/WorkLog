@@ -8,6 +8,10 @@ public struct ActivityClassifier {
             return ClassificationResult(kind: .ignored, categoryID: nil, projectID: nil, ruleID: nil)
         }
 
+        if isSystemSnapshot(snapshot: snapshot) {
+            return ClassificationResult(kind: .ignored, categoryID: nil, projectID: nil, ruleID: nil)
+        }
+
         let sortedRules = rules
             .filter(\.enabled)
             .sorted { first, second in
@@ -94,5 +98,12 @@ public struct ActivityClassifier {
             || bundle.contains("safari")
             || bundle.contains("arc")
             || bundle.contains("firefox")
+    }
+
+    private func isSystemSnapshot(snapshot: ActivitySnapshot) -> Bool {
+        let app = snapshot.appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let bundle = snapshot.bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        return app == "loginwindow" || bundle == "com.apple.loginwindow"
     }
 }

@@ -517,6 +517,7 @@ public final class WorklogStore {
         try execute("CREATE INDEX IF NOT EXISTS activity_segments_started_at_idx ON activity_segments(started_at)")
         try execute("CREATE INDEX IF NOT EXISTS activity_segments_ended_at_idx ON activity_segments(ended_at)")
         try execute("CREATE INDEX IF NOT EXISTS rules_priority_idx ON rules(priority)")
+        try deleteSystemSegments()
     }
 
     private func seedIfNeeded() throws {
@@ -612,6 +613,16 @@ public final class WorklogStore {
 
     private func deleteSegment(id: UUID) throws {
         try execute("DELETE FROM activity_segments WHERE id = ?", bindings: [.text(id.uuidString)])
+    }
+
+    private func deleteSystemSegments() throws {
+        try execute(
+            """
+            DELETE FROM activity_segments
+            WHERE lower(app_name) = 'loginwindow'
+                OR lower(bundle_id) = 'com.apple.loginwindow'
+            """
+        )
     }
 
     private func loadSegments(startDate: Date?) throws -> [ActivitySegment] {

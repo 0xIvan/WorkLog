@@ -63,6 +63,16 @@ struct ActivityClassifierTests {
     }
 
     @Test
+    func loginwindowIsIgnored() {
+        let result = classifier.classify(
+            snapshot: snapshot(appName: "loginwindow", bundleIdentifier: "com.apple.loginwindow"),
+            rules: []
+        )
+
+        #expect(result.kind == .ignored)
+    }
+
+    @Test
     func unknownChromeNeedsReview() {
         let result = classifier.classify(
             snapshot: snapshot(appName: "Google Chrome", title: "Search"),
@@ -74,13 +84,14 @@ struct ActivityClassifierTests {
 
     private func snapshot(
         appName: String,
+        bundleIdentifier: String? = nil,
         title: String = "",
         url: String? = nil,
         isPrivate: Bool = false
     ) -> ActivitySnapshot {
         ActivitySnapshot(
             appName: appName,
-            bundleIdentifier: appName == "Google Chrome" ? "com.google.Chrome" : "test.\(appName)",
+            bundleIdentifier: bundleIdentifier ?? (appName == "Google Chrome" ? "com.google.Chrome" : "test.\(appName)"),
             processIdentifier: 1,
             windowTitle: title,
             url: url,
