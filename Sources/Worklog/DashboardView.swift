@@ -134,27 +134,28 @@ private struct ReviewTab: View {
 
 private struct RecentActivityTab: View {
     @EnvironmentObject private var appState: AppState
+    @State private var searchText = ""
+    @State private var kindFilter = ActivityKindFilter.all
+    @State private var projectFilterID = ActivityProjectFilter.all
+    @State private var sort = ActivitySort.newest
+
     private let formatter = TimeFormatting()
+
+    private var displayedSegments: [ClassifiedSegment] {
+        sortedSegments(filteredSegments(appState.activitySegments))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            DatePicker(
-                "Date",
-                selection: Binding(
-                    get: { appState.activityDate },
-                    set: { appState.selectActivityDate($0) }
-                ),
-                displayedComponents: .date
-            )
-            .datePickerStyle(.compact)
+            activityControls
 
             List {
-                if appState.activitySegments.isEmpty {
-                    Text("No activity for this day")
+                if displayedSegments.isEmpty {
+                    Text(emptyActivityMessage)
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(appState.activitySegments) { item in
+                ForEach(displayedSegments) { item in
                     HStack(spacing: 12) {
                         Circle()
                             .fill(color(for: item.classification.kind))
@@ -210,6 +211,111 @@ private struct RecentActivityTab: View {
         }
     }
 
+    private var emptyActivityMessage: String {
+        appState.activitySegments.isEmpty ? "No activity for this day" : "No matching activity"
+    }
+
+    private var activityControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                DatePicker(
+                    "Date",
+                    selection: Binding(
+                        get: { appState.activityDate },
+                        set: { appState.selectActivityDate($0) }
+                    ),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.compact)
+
+                TextField("Search activity", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 220, maxWidth: 320)
+            }
+
+            HStack(spacing: 12) {
+                Picker("Category", selection: $kindFilter) {
+                    ForEach(ActivityKindFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .frame(width: 180)
+
+                Picker("Project", selection: $projectFilterID) {
+                    Text("All Projects").tag(ActivityProjectFilter.all)
+                    Text("No Project").tag(ActivityProjectFilter.none)
+                    ForEach(appState.projects) { project in
+                        Text(project.name).tag(project.id.uuidString)
+                    }
+                }
+                .frame(width: 200)
+
+                Picker("Sort", selection: $sort) {
+                    ForEach(ActivitySort.allCases) { sort in
+                        Text(sort.title).tag(sort)
+                    }
+                }
+                .frame(width: 190)
+            }
+        }
+    }
+
+    private func filteredSegments(_ segments: [ClassifiedSegment]) -> [ClassifiedSegment] {
+        let trimmedSearchText = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        return segments.filter { item in
+            if let kind = kindFilter.kind, item.classification.kind != kind {
+                return false
+            }
+
+            if projectFilterID == ActivityProjectFilter.none, item.classification.projectID != nil {
+                return false
+            }
+
+            if projectFilterID != ActivityProjectFilter.all, projectFilterID != ActivityProjectFilter.none {
+                guard item.classification.projectID?.uuidString == projectFilterID else {
+                    return false
+                }
+            }
+
+            guard !trimmedSearchText.isEmpty else {
+                return true
+            }
+
+            return [
+                item.segment.appName,
+                item.segment.windowTitle,
+                item.segment.url ?? "",
+                item.projectName ?? "",
+                categoryName(for: item)
+            ]
+                .contains { value in
+                    value.lowercased().contains(trimmedSearchText)
+                }
+        }
+    }
+
+    private func sortedSegments(_ segments: [ClassifiedSegment]) -> [ClassifiedSegment] {
+        switch sort {
+        case .newest:
+            segments.sorted { $0.segment.startedAt > $1.segment.startedAt }
+        case .oldest:
+            segments.sorted { $0.segment.startedAt < $1.segment.startedAt }
+        case .longest:
+            segments.sorted { $0.segment.duration > $1.segment.duration }
+        case .shortest:
+            segments.sorted { $0.segment.duration < $1.segment.duration }
+        case .app:
+            segments.sorted {
+                $0.segment.appName.localizedCaseInsensitiveCompare($1.segment.appName) == .orderedAscending
+            }
+        case .category:
+            segments.sorted {
+                categoryName(for: $0).localizedCaseInsensitiveCompare(categoryName(for: $1)) == .orderedAscending
+            }
+        }
+    }
+
     private func categoryName(for item: ClassifiedSegment) -> String {
         guard let categoryName = item.categoryName, !categoryName.isEmpty else {
             return item.classification.kind.displayName
@@ -241,6 +347,78 @@ private struct RecentActivityTab: View {
             .orange
         case .ignored:
             .gray
+        }
+    }
+}
+
+private enum ActivityKindFilter: String, CaseIterable, Identifiable {
+    case all
+    case work
+    case personal
+    case review
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All Categories"
+        case .work:
+            "Work"
+        case .personal:
+            "Personal"
+        case .review:
+            "Needs Review"
+        }
+    }
+
+    var kind: ActivityKind? {
+        switch self {
+        case .all:
+            nil
+        case .work:
+            .work
+        case .personal:
+            .personal
+        case .review:
+            .review
+        }
+    }
+}
+
+private enum ActivityProjectFilter {
+    static let all = "all"
+    static let none = "none"
+}
+
+private enum ActivitySort: String, CaseIterable, Identifiable {
+    case newest
+    case oldest
+    case longest
+    case shortest
+    case app
+    case category
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .newest:
+            "Newest First"
+        case .oldest:
+            "Oldest First"
+        case .longest:
+            "Longest First"
+        case .shortest:
+            "Shortest First"
+        case .app:
+            "App A-Z"
+        case .category:
+            "Category A-Z"
         }
     }
 }
