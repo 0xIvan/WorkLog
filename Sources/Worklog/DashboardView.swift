@@ -216,47 +216,44 @@ private struct RecentActivityTab: View {
     }
 
     private var activityControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                DatePicker(
-                    "Date",
-                    selection: Binding(
-                        get: { appState.activityDate },
-                        set: { appState.selectActivityDate($0) }
-                    ),
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.compact)
+        WrappingHStack(horizontalSpacing: 12, verticalSpacing: 8) {
+            DatePicker(
+                "Date",
+                selection: Binding(
+                    get: { appState.activityDate },
+                    set: { appState.selectActivityDate($0) }
+                ),
+                displayedComponents: .date
+            )
+            .datePickerStyle(.compact)
+            .fixedSize()
 
-                TextField("Search activity", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 220, maxWidth: 320)
+            TextField("Search activity", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 160)
+
+            Picker("Category", selection: $kindFilter) {
+                ForEach(ActivityKindFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
+                }
             }
+            .frame(width: 170)
 
-            HStack(spacing: 12) {
-                Picker("Category", selection: $kindFilter) {
-                    ForEach(ActivityKindFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
-                    }
+            Picker("Project", selection: $projectFilterID) {
+                Text("All Projects").tag(ActivityProjectFilter.all)
+                Text("No Project").tag(ActivityProjectFilter.none)
+                ForEach(appState.projects) { project in
+                    Text(project.name).tag(project.id.uuidString)
                 }
-                .frame(width: 180)
-
-                Picker("Project", selection: $projectFilterID) {
-                    Text("All Projects").tag(ActivityProjectFilter.all)
-                    Text("No Project").tag(ActivityProjectFilter.none)
-                    ForEach(appState.projects) { project in
-                        Text(project.name).tag(project.id.uuidString)
-                    }
-                }
-                .frame(width: 200)
-
-                Picker("Sort", selection: $sort) {
-                    ForEach(ActivitySort.allCases) { sort in
-                        Text(sort.title).tag(sort)
-                    }
-                }
-                .frame(width: 190)
             }
+            .frame(width: 190)
+
+            Picker("Sort", selection: $sort) {
+                ForEach(ActivitySort.allCases) { sort in
+                    Text(sort.title).tag(sort)
+                }
+            }
+            .frame(width: 180)
         }
     }
 

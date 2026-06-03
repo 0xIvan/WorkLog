@@ -114,40 +114,38 @@ struct RulesSettingsView: View {
     }
 
     private var ruleControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        WrappingHStack(horizontalSpacing: 12, verticalSpacing: 8) {
             TextField("Search rules", text: $searchText)
                 .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 260, maxWidth: 360)
+                .frame(width: 160)
 
-            HStack(spacing: 12) {
-                Picker("Result", selection: $kindFilter) {
-                    ForEach(RuleKindFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
-                    }
+            Picker("Result", selection: $kindFilter) {
+                ForEach(RuleKindFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
                 }
-                .frame(width: 170)
-
-                Picker("Status", selection: $statusFilter) {
-                    ForEach(RuleStatusFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
-                    }
-                }
-                .frame(width: 150)
-
-                Picker("Source", selection: $sourceFilter) {
-                    ForEach(RuleSourceFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
-                    }
-                }
-                .frame(width: 150)
-
-                Picker("Field", selection: $fieldFilter) {
-                    ForEach(RuleFieldFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
-                    }
-                }
-                .frame(width: 180)
             }
+            .frame(width: 160)
+
+            Picker("Status", selection: $statusFilter) {
+                ForEach(RuleStatusFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
+                }
+            }
+            .frame(width: 145)
+
+            Picker("Source", selection: $sourceFilter) {
+                ForEach(RuleSourceFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
+                }
+            }
+            .frame(width: 145)
+
+            Picker("Field", selection: $fieldFilter) {
+                ForEach(RuleFieldFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
+                }
+            }
+            .frame(width: 170)
         }
     }
 
