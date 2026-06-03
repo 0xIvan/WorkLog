@@ -195,6 +195,7 @@ final class AppState: ObservableObject {
 
         do {
             try createRememberedRule(from: segment, kind: kind, categoryID: categoryID)
+            try store?.reclassify(scope: .today)
 
             if kind == .ignored {
                 try store?.ignoreSegment(id: segment.id)
