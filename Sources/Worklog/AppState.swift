@@ -277,7 +277,7 @@ final class AppState: ObservableObject {
             conditions: [condition]
         )
 
-        try store?.saveRule(rule)
+        try store?.saveRememberedRule(rule)
     }
 
     private func hideFromDockIfNoWindowsAreOpen() {

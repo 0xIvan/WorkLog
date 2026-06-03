@@ -53,6 +53,51 @@ struct WorklogStoreTests {
     }
 
     @Test
+    func saveRememberedRuleDoesNotCreateDuplicates() throws {
+        let store = try makeStore()
+
+        try store.saveRememberedRule(rememberedRule(id: "AAAAAAAA-0000-0000-0000-000000000001"))
+        try store.saveRememberedRule(rememberedRule(id: "AAAAAAAA-0000-0000-0000-000000000002"))
+
+        let rememberedRules = try store.loadRules()
+            .filter { $0.name == "Remember clerk.com" }
+
+        #expect(rememberedRules.count == 1)
+        #expect(rememberedRules.first?.id == UUID(uuidString: "AAAAAAAA-0000-0000-0000-000000000001"))
+    }
+
+    @Test
+    func deduplicateRememberedRulesKeepsActivityRuleReferences() throws {
+        let store = try makeStore()
+        let keeperRule = rememberedRule(id: "AAAAAAAA-0000-0000-0000-000000000001")
+        let duplicateRule = rememberedRule(id: "AAAAAAAA-0000-0000-0000-000000000002")
+        let segment = segment(url: "https://clerk.com/docs")
+
+        try store.saveRule(keeperRule)
+        try store.saveRule(duplicateRule)
+        try store.save(
+            segment: segment,
+            classification: SegmentClassification(
+                segmentID: segment.id,
+                kind: .work,
+                categoryID: SeedData.workCategoryID,
+                projectID: nil,
+                ruleID: duplicateRule.id,
+                isManual: false
+            )
+        )
+
+        try store.deduplicateRememberedRules()
+
+        let rememberedRules = try store.loadRules()
+            .filter { $0.name == "Remember clerk.com" }
+        let activitySegments = try store.activitySegments(for: Date())
+
+        #expect(rememberedRules.count == 1)
+        #expect(activitySegments.first?.classification.ruleID == keeperRule.id)
+    }
+
+    @Test
     func activitySegmentsForDateReflectManualClassificationEdits() throws {
         let store = try makeStore()
         let segment = segment(url: "https://example.com")
@@ -135,5 +180,19 @@ struct WorklogStoreTests {
         )
 
         return ActivitySegment(startedAt: start, endedAt: end, snapshot: snapshot)
+    }
+
+    private func rememberedRule(id: String) -> Rule {
+        Rule(
+            id: UUID(uuidString: id)!,
+            name: "Remember clerk.com",
+            priority: 150,
+            enabled: true,
+            isBuiltIn: false,
+            action: RuleAction(kind: .work, categoryID: SeedData.workCategoryID, projectID: nil),
+            conditions: [
+                RuleCondition(field: .host, operation: .equals, value: "clerk.com")
+            ]
+        )
     }
 }

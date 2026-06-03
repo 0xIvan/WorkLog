@@ -62,6 +62,7 @@ public final class WorklogStore {
         try execute("PRAGMA foreign_keys = ON")
         try migrate()
         try seedIfNeeded()
+        try deduplicateRememberedRules()
     }
 
     deinit {
@@ -196,6 +197,57 @@ public final class WorklogStore {
                     .text(condition.value)
                 ]
             )
+        }
+    }
+
+    @discardableResult
+    public func saveRememberedRule(_ rule: Rule) throws -> UUID {
+        guard let signature = rememberedRuleSignature(rule) else {
+            try saveRule(rule)
+            return rule.id
+        }
+
+        if var existingRule = try loadRules().first(where: { rememberedRuleSignature($0) == signature }) {
+            if !existingRule.enabled {
+                existingRule.enabled = true
+                try saveRule(existingRule)
+            }
+
+            return existingRule.id
+        }
+
+        try saveRule(rule)
+        return rule.id
+    }
+
+    public func deduplicateRememberedRules() throws {
+        let rememberedRuleGroups = Dictionary(grouping: try loadRules()) { rule in
+            rememberedRuleSignature(rule)
+        }
+        .compactMap { signature, rules in
+            signature == nil ? nil : rules
+        }
+
+        for rules in rememberedRuleGroups where rules.count > 1 {
+            let sortedRules = rules.sorted(by: preferredRememberedRule)
+            guard let keeper = sortedRules.first else {
+                continue
+            }
+
+            for duplicate in sortedRules.dropFirst() {
+                try execute(
+                    """
+                    UPDATE classifications
+                    SET rule_id = ?
+                    WHERE rule_id = ?
+                    """,
+                    bindings: [
+                        .text(keeper.id.uuidString),
+                        .text(duplicate.id.uuidString)
+                    ]
+                )
+                try deleteRule(id: duplicate.id)
+            }
         }
     }
 
@@ -792,6 +844,54 @@ public final class WorklogStore {
 }
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+private func rememberedRuleSignature(_ rule: Rule) -> RememberedRuleSignature? {
+    guard !rule.isBuiltIn,
+          !rule.conditions.isEmpty,
+          rule.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("remember ") else {
+        return nil
+    }
+
+    return RememberedRuleSignature(
+        kind: rule.action.kind,
+        categoryID: rule.action.categoryID,
+        projectID: rule.action.projectID,
+        conditions: rule.conditions
+            .map { condition in
+                [
+                    condition.field.rawValue,
+                    condition.operation.rawValue,
+                    condition.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                ]
+                    .joined(separator: "\u{1F}")
+            }
+            .sorted()
+    )
+}
+
+private func preferredRememberedRule(_ first: Rule, _ second: Rule) -> Bool {
+    if first.enabled != second.enabled {
+        return first.enabled && !second.enabled
+    }
+
+    if first.priority != second.priority {
+        return first.priority < second.priority
+    }
+
+    let nameOrder = first.name.localizedCaseInsensitiveCompare(second.name)
+    if nameOrder != .orderedSame {
+        return nameOrder == .orderedAscending
+    }
+
+    return first.id.uuidString < second.id.uuidString
+}
+
+private struct RememberedRuleSignature: Hashable {
+    var kind: ActivityKind
+    var categoryID: UUID?
+    var projectID: UUID?
+    var conditions: [String]
+}
 
 private func activitySegmentColumn(_ statement: OpaquePointer?) -> ActivitySegment {
     let snapshot = ActivitySnapshot(
