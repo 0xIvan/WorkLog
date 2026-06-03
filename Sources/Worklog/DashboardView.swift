@@ -183,6 +183,16 @@ private struct RecentActivityTab: View {
 private struct WeeklyChartView: View {
     var days: [WeekDaySummary]
 
+    @State private var selectedDayID: Date?
+
+    private var selectedDay: WeekDaySummary? {
+        guard let selectedDayID else {
+            return nil
+        }
+
+        return days.first { $0.id == selectedDayID }
+    }
+
     var body: some View {
         Chart {
             ForEach(days) { day in
@@ -204,12 +214,107 @@ private struct WeeklyChartView: View {
                 )
                 .foregroundStyle(by: .value("Type", "Review"))
             }
+
+            if let selectedDay {
+                RuleMark(x: .value("Selected Day", selectedDay.date, unit: .day))
+                    .foregroundStyle(.secondary.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .annotation(position: .top) {
+                        WeeklyChartTooltip(day: selectedDay)
+                    }
+            }
         }
         .chartForegroundStyleScale([
             "Work": .blue,
             "Personal": .green,
             "Review": .orange
         ])
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            updateSelection(at: location, proxy: proxy, geometry: geometry)
+                        case .ended:
+                            selectedDayID = nil
+                        }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                updateSelection(at: value.location, proxy: proxy, geometry: geometry)
+                            }
+                    )
+            }
+        }
+    }
+
+    private func updateSelection(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
+        guard let plotFrame = proxy.plotFrame else {
+            selectedDayID = nil
+            return
+        }
+
+        let plotAreaFrame = geometry[plotFrame]
+        let plotX = location.x - plotAreaFrame.origin.x
+
+        guard plotX >= 0, plotX <= plotAreaFrame.width else {
+            selectedDayID = nil
+            return
+        }
+
+        guard let selectedDate = proxy.value(atX: plotX, as: Date.self) else {
+            selectedDayID = nil
+            return
+        }
+
+        selectedDayID = days.min { first, second in
+            abs(first.date.timeIntervalSince(selectedDate)) < abs(second.date.timeIntervalSince(selectedDate))
+        }?.id
+    }
+}
+
+private struct WeeklyChartTooltip: View {
+    var day: WeekDaySummary
+
+    private let formatter = TimeFormatting()
+
+    private var totalSeconds: TimeInterval {
+        day.workSeconds + day.personalSeconds + day.reviewSeconds
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(day.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                .font(.caption.weight(.semibold))
+
+            Divider()
+
+            tooltipRow("Work", seconds: day.workSeconds, color: .blue)
+            tooltipRow("Personal", seconds: day.personalSeconds, color: .green)
+            tooltipRow("Review", seconds: day.reviewSeconds, color: .orange)
+            tooltipRow("Total", seconds: totalSeconds, color: .primary)
+        }
+        .font(.caption)
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(radius: 4)
+    }
+
+    private func tooltipRow(_ label: String, seconds: TimeInterval, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(label)
+            Spacer()
+            Text(formatter.compactDuration(seconds))
+                .monospacedDigit()
+        }
+        .frame(width: 150)
     }
 }
 
