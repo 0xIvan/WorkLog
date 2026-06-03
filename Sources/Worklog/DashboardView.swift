@@ -184,6 +184,9 @@ private struct WeeklyChartView: View {
     var days: [WeekDaySummary]
 
     @State private var selectedDayID: Date?
+    @State private var tooltipX: CGFloat?
+
+    private let tooltipWidth: CGFloat = 166
 
     private var selectedDay: WeekDaySummary? {
         guard let selectedDayID else {
@@ -219,9 +222,6 @@ private struct WeeklyChartView: View {
                 RuleMark(x: .value("Selected Day", selectedDay.date, unit: .day))
                     .foregroundStyle(.secondary.opacity(0.45))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .annotation(position: .top) {
-                        WeeklyChartTooltip(day: selectedDay)
-                    }
             }
         }
         .chartForegroundStyleScale([
@@ -231,30 +231,49 @@ private struct WeeklyChartView: View {
         ])
         .chartOverlay { proxy in
             GeometryReader { geometry in
-                Rectangle()
-                    .fill(.clear)
-                    .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active(let location):
-                            updateSelection(at: location, proxy: proxy, geometry: geometry)
-                        case .ended:
-                            selectedDayID = nil
-                        }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                updateSelection(at: value.location, proxy: proxy, geometry: geometry)
+                ZStack(alignment: .topLeading) {
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                updateSelection(at: location, proxy: proxy, geometry: geometry)
+                            case .ended:
+                                clearSelection()
                             }
-                    )
+                        }
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    updateSelection(at: value.location, proxy: proxy, geometry: geometry)
+                                }
+                        )
+
+                    if let selectedDay, let tooltipX, let plotFrame = proxy.plotFrame {
+                        let plotAreaFrame = geometry[plotFrame]
+
+                        WeeklyChartTooltip(day: selectedDay)
+                            .frame(width: tooltipWidth)
+                            .offset(
+                                x: clampedTooltipX(tooltipX, in: geometry),
+                                y: plotAreaFrame.minY + 8
+                            )
+                            .allowsHitTesting(false)
+                    }
+                }
             }
         }
     }
 
+    private func clearSelection() {
+        selectedDayID = nil
+        tooltipX = nil
+    }
+
     private func updateSelection(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
         guard let plotFrame = proxy.plotFrame else {
-            selectedDayID = nil
+            clearSelection()
             return
         }
 
@@ -262,18 +281,23 @@ private struct WeeklyChartView: View {
         let plotX = location.x - plotAreaFrame.origin.x
 
         guard plotX >= 0, plotX <= plotAreaFrame.width else {
-            selectedDayID = nil
+            clearSelection()
             return
         }
 
         guard let selectedDate = proxy.value(atX: plotX, as: Date.self) else {
-            selectedDayID = nil
+            clearSelection()
             return
         }
 
         selectedDayID = days.min { first, second in
             abs(first.date.timeIntervalSince(selectedDate)) < abs(second.date.timeIntervalSince(selectedDate))
         }?.id
+        tooltipX = min(max(location.x, plotAreaFrame.minX), plotAreaFrame.maxX)
+    }
+
+    private func clampedTooltipX(_ x: CGFloat, in geometry: GeometryProxy) -> CGFloat {
+        min(max(x - (tooltipWidth / 2), 0), max(0, geometry.size.width - tooltipWidth))
     }
 }
 
@@ -314,7 +338,6 @@ private struct WeeklyChartTooltip: View {
             Text(formatter.compactDuration(seconds))
                 .monospacedDigit()
         }
-        .frame(width: 150)
     }
 }
 
