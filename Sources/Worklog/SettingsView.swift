@@ -16,6 +16,15 @@ struct SettingsView: View {
 struct RulesSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var editingRule: Rule?
+    @State private var searchText = ""
+    @State private var kindFilter = RuleKindFilter.all
+    @State private var statusFilter = RuleStatusFilter.all
+    @State private var sourceFilter = RuleSourceFilter.all
+    @State private var fieldFilter = RuleFieldFilter.all
+
+    private var displayedRules: [Rule] {
+        filteredRules(appState.rules)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,8 +48,15 @@ struct RulesSettingsView: View {
                 }
             }
 
+            ruleControls
+
             List {
-                ForEach(appState.rules) { rule in
+                if displayedRules.isEmpty {
+                    Text(emptyRulesMessage)
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(displayedRules) { rule in
                     HStack {
                         Button {
                             var updatedRule = rule
@@ -93,6 +109,98 @@ struct RulesSettingsView: View {
         }
     }
 
+    private var emptyRulesMessage: String {
+        appState.rules.isEmpty ? "No rules" : "No matching rules"
+    }
+
+    private var ruleControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Search rules", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 260, maxWidth: 360)
+
+            HStack(spacing: 12) {
+                Picker("Result", selection: $kindFilter) {
+                    ForEach(RuleKindFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .frame(width: 170)
+
+                Picker("Status", selection: $statusFilter) {
+                    ForEach(RuleStatusFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .frame(width: 150)
+
+                Picker("Source", selection: $sourceFilter) {
+                    ForEach(RuleSourceFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .frame(width: 150)
+
+                Picker("Field", selection: $fieldFilter) {
+                    ForEach(RuleFieldFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .frame(width: 180)
+            }
+        }
+    }
+
+    private func filteredRules(_ rules: [Rule]) -> [Rule] {
+        let trimmedSearchText = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        return rules.filter { rule in
+            if let kind = kindFilter.kind, rule.action.kind != kind {
+                return false
+            }
+
+            if let enabled = statusFilter.enabled, rule.enabled != enabled {
+                return false
+            }
+
+            if let isBuiltIn = sourceFilter.isBuiltIn, rule.isBuiltIn != isBuiltIn {
+                return false
+            }
+
+            if let field = fieldFilter.field, !rule.conditions.contains(where: { $0.field == field }) {
+                return false
+            }
+
+            guard !trimmedSearchText.isEmpty else {
+                return true
+            }
+
+            return searchableValues(for: rule)
+                .contains { value in
+                    value.lowercased().contains(trimmedSearchText)
+                }
+        }
+    }
+
+    private func searchableValues(for rule: Rule) -> [String] {
+        [
+            rule.name,
+            rule.action.kind.displayName,
+            rule.isBuiltIn ? "built in" : "user",
+            rule.enabled ? "enabled" : "disabled",
+            projectName(for: rule) ?? "",
+            ruleSummary(rule)
+        ]
+    }
+
+    private func projectName(for rule: Rule) -> String? {
+        guard let projectID = rule.action.projectID else {
+            return nil
+        }
+
+        return appState.projects.first { $0.id == projectID }?.name
+    }
+
     private func categoryID(for kind: ActivityKind) -> UUID? {
         appState.categories.first { $0.kind == kind }?.id
     }
@@ -113,6 +221,159 @@ struct RulesSettingsView: View {
             .orange
         case .ignored:
             .secondary
+        }
+    }
+}
+
+private enum RuleKindFilter: String, CaseIterable, Identifiable {
+    case all
+    case work
+    case personal
+    case review
+    case ignored
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All Results"
+        case .work:
+            "Work"
+        case .personal:
+            "Personal"
+        case .review:
+            "Needs Review"
+        case .ignored:
+            "Ignored"
+        }
+    }
+
+    var kind: ActivityKind? {
+        switch self {
+        case .all:
+            nil
+        case .work:
+            .work
+        case .personal:
+            .personal
+        case .review:
+            .review
+        case .ignored:
+            .ignored
+        }
+    }
+}
+
+private enum RuleStatusFilter: String, CaseIterable, Identifiable {
+    case all
+    case enabled
+    case disabled
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All Statuses"
+        case .enabled:
+            "Enabled"
+        case .disabled:
+            "Disabled"
+        }
+    }
+
+    var enabled: Bool? {
+        switch self {
+        case .all:
+            nil
+        case .enabled:
+            true
+        case .disabled:
+            false
+        }
+    }
+}
+
+private enum RuleSourceFilter: String, CaseIterable, Identifiable {
+    case all
+    case user
+    case builtIn
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All Sources"
+        case .user:
+            "User"
+        case .builtIn:
+            "Built-in"
+        }
+    }
+
+    var isBuiltIn: Bool? {
+        switch self {
+        case .all:
+            nil
+        case .user:
+            false
+        case .builtIn:
+            true
+        }
+    }
+}
+
+private enum RuleFieldFilter: String, CaseIterable, Identifiable {
+    case all
+    case appName
+    case bundleIdentifier
+    case windowTitle
+    case url
+    case host
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All Fields"
+        case .appName:
+            RuleField.appName.displayName
+        case .bundleIdentifier:
+            RuleField.bundleIdentifier.displayName
+        case .windowTitle:
+            RuleField.windowTitle.displayName
+        case .url:
+            RuleField.url.displayName
+        case .host:
+            RuleField.host.displayName
+        }
+    }
+
+    var field: RuleField? {
+        switch self {
+        case .all:
+            nil
+        case .appName:
+            .appName
+        case .bundleIdentifier:
+            .bundleIdentifier
+        case .windowTitle:
+            .windowTitle
+        case .url:
+            .url
+        case .host:
+            .host
         }
     }
 }
