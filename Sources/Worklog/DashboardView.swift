@@ -25,6 +25,8 @@ struct DashboardView: View {
         switch appState.selectedSection {
         case .overview:
             OverviewTab()
+        case .reports:
+            ReportsView()
         case .review:
             ReviewTab()
         case .activity:
@@ -581,7 +583,7 @@ private struct WeeklyChartTooltip: View {
     }
 }
 
-private struct BucketListView: View {
+struct BucketListView: View {
     var buckets: [TimeBucket]
 
     var body: some View {
@@ -626,7 +628,7 @@ private struct MetricView: View {
     }
 }
 
-private struct SectionPanel<Content: View>: View {
+struct SectionPanel<Content: View>: View {
     var title: String
     @ViewBuilder var content: Content
 

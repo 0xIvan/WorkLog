@@ -248,3 +248,89 @@ public struct WeekDaySummary: Identifiable, Equatable, Sendable {
         self.reviewSeconds = reviewSeconds
     }
 }
+
+public enum ReportPeriodKind: String, CaseIterable, Identifiable, Sendable {
+    case week
+    case month
+
+    public var id: String {
+        rawValue
+    }
+}
+
+public enum ReportBucketKind: Sendable {
+    case day
+    case week
+}
+
+public struct ReportBucket: Identifiable, Equatable, Sendable {
+    public var id: Date {
+        startDate
+    }
+
+    public var startDate: Date
+    public var endDate: Date
+    public var workSeconds: TimeInterval
+    public var personalSeconds: TimeInterval
+    public var reviewSeconds: TimeInterval
+
+    public init(
+        startDate: Date,
+        endDate: Date,
+        workSeconds: TimeInterval,
+        personalSeconds: TimeInterval,
+        reviewSeconds: TimeInterval
+    ) {
+        self.startDate = startDate
+        self.endDate = endDate
+        self.workSeconds = workSeconds
+        self.personalSeconds = personalSeconds
+        self.reviewSeconds = reviewSeconds
+    }
+}
+
+public struct ReportSummary: Equatable, Sendable {
+    public var periodKind: ReportPeriodKind
+    public var startDate: Date
+    public var endDate: Date
+    public var workSeconds: TimeInterval
+    public var personalSeconds: TimeInterval
+    public var reviewSeconds: TimeInterval
+    public var topApps: [TimeBucket]
+    public var topProjects: [TimeBucket]
+    public var buckets: [ReportBucket]
+
+    public init(
+        periodKind: ReportPeriodKind,
+        startDate: Date,
+        endDate: Date,
+        workSeconds: TimeInterval,
+        personalSeconds: TimeInterval,
+        reviewSeconds: TimeInterval,
+        topApps: [TimeBucket],
+        topProjects: [TimeBucket],
+        buckets: [ReportBucket]
+    ) {
+        self.periodKind = periodKind
+        self.startDate = startDate
+        self.endDate = endDate
+        self.workSeconds = workSeconds
+        self.personalSeconds = personalSeconds
+        self.reviewSeconds = reviewSeconds
+        self.topApps = topApps
+        self.topProjects = topProjects
+        self.buckets = buckets
+    }
+
+    public var totalSeconds: TimeInterval {
+        workSeconds + personalSeconds + reviewSeconds
+    }
+
+    public var workRatio: Double {
+        guard totalSeconds > 0 else {
+            return 0
+        }
+
+        return workSeconds / totalSeconds
+    }
+}

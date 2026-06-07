@@ -159,6 +159,46 @@ struct WorklogStoreTests {
         #expect(activitySegments.first?.categoryName == "Deep Work")
     }
 
+    @Test
+    func weekReportAggregatesTotalsBucketsAndPreviousPeriod() throws {
+        let store = try makeStore()
+        let workSegment = segment(url: "https://example.com")
+        let personalSegment = segment(url: "https://x.com", offset: 600)
+
+        try store.save(
+            segment: workSegment,
+            classification: SegmentClassification(
+                segmentID: workSegment.id,
+                kind: .work,
+                categoryID: SeedData.workCategoryID,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.save(
+            segment: personalSegment,
+            classification: SegmentClassification(
+                segmentID: personalSegment.id,
+                kind: .personal,
+                categoryID: SeedData.personalCategoryID,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+
+        let report = try store.reportSummary(for: .week, containing: Date())
+        let previousReport = try store.previousReportSummary(for: .week, containing: Date())
+
+        #expect(report.workSeconds == 120)
+        #expect(report.personalSeconds == 120)
+        #expect(report.totalSeconds == 240)
+        #expect(report.buckets.count == 7)
+        #expect(report.topApps.first?.seconds == 240)
+        #expect(previousReport.totalSeconds == 0)
+    }
+
     private func makeStore() throws -> WorklogStore {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

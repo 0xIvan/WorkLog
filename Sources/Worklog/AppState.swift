@@ -201,6 +201,26 @@ final class AppState: ObservableObject {
         reload()
     }
 
+    func loadReportPair(
+        for periodKind: ReportPeriodKind,
+        containing date: Date
+    ) -> (current: ReportSummary, previous: ReportSummary)? {
+        do {
+            guard let store else {
+                return nil
+            }
+
+            let current = try store.reportSummary(for: periodKind, containing: date)
+            let previous = try store.previousReportSummary(for: periodKind, containing: date)
+            errorMessage = nil
+
+            return (current, previous)
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func classifySegment(_ segment: ClassifiedSegment, as kind: ActivityKind) {
         let categoryID = categories.first { $0.kind == kind }?.id
 

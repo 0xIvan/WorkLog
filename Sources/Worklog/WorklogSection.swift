@@ -2,6 +2,7 @@ import SwiftUI
 
 enum WorklogSection: String, CaseIterable, Identifiable, Hashable {
     case overview
+    case reports
     case review
     case activity
     case rules
@@ -17,6 +18,8 @@ enum WorklogSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .overview:
             "Overview"
+        case .reports:
+            "Reports"
         case .review:
             "Review"
         case .activity:
@@ -36,6 +39,8 @@ enum WorklogSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .overview:
             "chart.bar.xaxis"
+        case .reports:
+            "chart.xyaxis.line"
         case .review:
             "checklist"
         case .activity:

@@ -446,6 +446,31 @@ public final class WorklogStore {
         }
     }
 
+    public func reportSummary(for periodKind: ReportPeriodKind, containing date: Date) throws -> ReportSummary {
+        let interval = reportInterval(for: periodKind, containing: date)
+        let bucketKind: ReportBucketKind = periodKind == .week ? .day : .week
+
+        return try reportSummary(
+            for: periodKind,
+            startingAt: interval.start,
+            endingBefore: interval.end,
+            bucketKind: bucketKind
+        )
+    }
+
+    public func previousReportSummary(for periodKind: ReportPeriodKind, containing date: Date) throws -> ReportSummary {
+        let interval = reportInterval(for: periodKind, containing: date)
+        let previousDate: Date
+        switch periodKind {
+        case .week:
+            previousDate = Calendar.current.date(byAdding: .day, value: -1, to: interval.start) ?? interval.start
+        case .month:
+            previousDate = Calendar.current.date(byAdding: .month, value: -1, to: interval.start) ?? interval.start
+        }
+
+        return try reportSummary(for: periodKind, containing: previousDate)
+    }
+
     public func reviewSegments(for date: Date) throws -> [ClassifiedSegment] {
         let interval = dayInterval(for: date)
 
@@ -756,6 +781,121 @@ public final class WorklogStore {
         ) { statement in
             classifiedSegmentColumn(statement)
         }
+    }
+
+    private func reportInterval(for periodKind: ReportPeriodKind, containing date: Date) -> DateInterval {
+        switch periodKind {
+        case .week:
+            WorklogCalendar.shared.weekInterval(containing: date)
+        case .month:
+            WorklogCalendar.shared.monthInterval(containing: date)
+        }
+    }
+
+    private func reportSummary(
+        for periodKind: ReportPeriodKind,
+        startingAt start: Date,
+        endingBefore end: Date,
+        bucketKind: ReportBucketKind
+    ) throws -> ReportSummary {
+        let segments = try classifiedSegments(startingAt: start, endingBefore: end)
+        let totals = reportTotals(from: segments)
+
+        return ReportSummary(
+            periodKind: periodKind,
+            startDate: start,
+            endDate: end,
+            workSeconds: totals.workSeconds,
+            personalSeconds: totals.personalSeconds,
+            reviewSeconds: totals.reviewSeconds,
+            topApps: buckets(from: totals.appDurations, kind: .work),
+            topProjects: buckets(from: totals.projectDurations, kind: .work),
+            buckets: reportBuckets(
+                from: segments,
+                startingAt: start,
+                endingBefore: end,
+                bucketKind: bucketKind
+            )
+        )
+    }
+
+    private func reportTotals(from segments: [ClassifiedSegment]) -> (
+        workSeconds: TimeInterval,
+        personalSeconds: TimeInterval,
+        reviewSeconds: TimeInterval,
+        appDurations: [String: TimeInterval],
+        projectDurations: [String: TimeInterval]
+    ) {
+        var workSeconds: TimeInterval = 0
+        var personalSeconds: TimeInterval = 0
+        var reviewSeconds: TimeInterval = 0
+        var appDurations: [String: TimeInterval] = [:]
+        var projectDurations: [String: TimeInterval] = [:]
+
+        for item in segments {
+            let duration = item.segment.duration
+
+            switch item.classification.kind {
+            case .work:
+                workSeconds += duration
+            case .personal:
+                personalSeconds += duration
+            case .review:
+                reviewSeconds += duration
+            case .ignored:
+                continue
+            }
+
+            appDurations[item.segment.appName, default: 0] += duration
+
+            if let projectName = item.projectName {
+                projectDurations[projectName, default: 0] += duration
+            }
+        }
+
+        return (workSeconds, personalSeconds, reviewSeconds, appDurations, projectDurations)
+    }
+
+    private func reportBuckets(
+        from segments: [ClassifiedSegment],
+        startingAt start: Date,
+        endingBefore end: Date,
+        bucketKind: ReportBucketKind
+    ) -> [ReportBucket] {
+        intervals(startingAt: start, endingBefore: end, bucketKind: bucketKind).map { interval in
+            let totals = reportTotals(
+                from: segments.filter { item in
+                    item.segment.startedAt >= interval.start && item.segment.startedAt < interval.end
+                }
+            )
+
+            return ReportBucket(
+                startDate: interval.start,
+                endDate: interval.end,
+                workSeconds: totals.workSeconds,
+                personalSeconds: totals.personalSeconds,
+                reviewSeconds: totals.reviewSeconds
+            )
+        }
+    }
+
+    private func intervals(
+        startingAt start: Date,
+        endingBefore end: Date,
+        bucketKind: ReportBucketKind
+    ) -> [DateInterval] {
+        let value = bucketKind == .day ? 1 : 7
+        var intervals: [DateInterval] = []
+        var currentStart = start
+
+        while currentStart < end {
+            let nextStart = Calendar.current.date(byAdding: .day, value: value, to: currentStart) ?? end
+            let currentEnd = min(nextStart, end)
+            intervals.append(DateInterval(start: currentStart, end: currentEnd))
+            currentStart = currentEnd
+        }
+
+        return intervals
     }
 
     private func dayInterval(for date: Date) -> DateInterval {

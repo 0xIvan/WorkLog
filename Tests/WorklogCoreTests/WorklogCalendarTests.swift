@@ -28,6 +28,18 @@ struct WorklogCalendarTests {
         #expect(interval.end == expectedEnd)
     }
 
+    @Test
+    func monthBeforeFourAMBelongsToPreviousWorklogMonth() throws {
+        let calendar = utcCalendar()
+        let sampleDate = try date("2026-06-01T03:30:00Z")
+        let expectedStart = try date("2026-05-01T04:00:00Z")
+        let expectedEnd = try date("2026-06-01T04:00:00Z")
+        let interval = WorklogCalendar().monthInterval(containing: sampleDate, calendar: calendar)
+
+        #expect(interval.start == expectedStart)
+        #expect(interval.end == expectedEnd)
+    }
+
     private func utcCalendar() -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

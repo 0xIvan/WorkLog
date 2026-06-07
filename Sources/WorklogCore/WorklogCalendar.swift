@@ -44,4 +44,32 @@ public struct WorklogCalendar: Sendable {
             to: calendarWeekStart
         ) ?? calendarWeekStart
     }
+
+    public func weekInterval(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let start = weekStart(containing: date, calendar: calendar)
+        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
+
+        return DateInterval(start: start, end: end)
+    }
+
+    public func monthInterval(containing date: Date, calendar: Calendar = .current) -> DateInterval {
+        let localCalendar = calendar
+        let currentDayStart = dayInterval(containing: date, calendar: localCalendar).start
+        let calendarMonthStart = localCalendar.dateInterval(of: .month, for: currentDayStart)?.start
+            ?? localCalendar.startOfDay(for: currentDayStart)
+        let start = localCalendar.date(
+            byAdding: .hour,
+            value: dayCutoffHour,
+            to: calendarMonthStart
+        ) ?? calendarMonthStart
+        let nextMonthStart = localCalendar.date(byAdding: .month, value: 1, to: calendarMonthStart)
+            ?? calendarMonthStart
+        let end = localCalendar.date(
+            byAdding: .hour,
+            value: dayCutoffHour,
+            to: nextMonthStart
+        ) ?? nextMonthStart
+
+        return DateInterval(start: start, end: end)
+    }
 }
