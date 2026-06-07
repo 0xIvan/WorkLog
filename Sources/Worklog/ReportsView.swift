@@ -40,7 +40,9 @@ struct ReportsView: View {
                                 )
                             }
                         }
+                        .frame(maxWidth: .infinity)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 Text("No report data")
@@ -103,7 +105,7 @@ struct ReportsView: View {
     }
 
     private func reportMetrics(_ report: ReportSummary, previous: ReportSummary) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             ReportMetricCard(
                 title: "Work",
                 value: formatter.compactDuration(report.workSeconds),
@@ -129,6 +131,7 @@ struct ReportsView: View {
                 color: .purple
             )
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func reloadReport() {
