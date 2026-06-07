@@ -478,6 +478,41 @@ public final class WorklogStore {
             .filter { $0.classification.kind == .review }
     }
 
+    public func reviewSegments() throws -> [ClassifiedSegment] {
+        try query(
+            """
+            SELECT
+                s.id,
+                s.started_at,
+                s.ended_at,
+                s.app_name,
+                s.bundle_id,
+                s.process_id,
+                s.window_title,
+                s.url,
+                s.source,
+                c.kind,
+                c.category_id,
+                c.project_id,
+                c.rule_id,
+                c.is_manual,
+                p.name,
+                cat.name,
+                r.name
+            FROM activity_segments s
+            JOIN classifications c ON c.segment_id = s.id
+            LEFT JOIN projects p ON p.id = c.project_id
+            LEFT JOIN categories cat ON cat.id = c.category_id
+            LEFT JOIN rules r ON r.id = c.rule_id
+            WHERE c.kind = ?
+            ORDER BY s.started_at DESC
+            """,
+            bindings: [.text(ActivityKind.review.rawValue)]
+        ) { statement in
+            classifiedSegmentColumn(statement)
+        }
+    }
+
     public func activitySegments(for date: Date) throws -> [ClassifiedSegment] {
         let interval = dayInterval(for: date)
 

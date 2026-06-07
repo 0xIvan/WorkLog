@@ -132,7 +132,7 @@ final class AppState: ObservableObject {
         projects = try store.loadProjects()
         todaySummary = try store.daySummary(for: Date())
         weekSummary = try store.weekSummary(containing: Date())
-        reviewSegments = try store.reviewSegments(for: Date())
+        reviewSegments = try store.reviewSegments()
         activitySegments = try store.activitySegments(for: activityDate)
         recentSegments = try store.recentSegments(limit: 20)
         accessibilityTrusted = reader.accessibilityIsTrusted()
@@ -226,7 +226,7 @@ final class AppState: ObservableObject {
 
         do {
             try createRememberedRule(from: segment, kind: kind, categoryID: categoryID)
-            try store?.reclassify(scope: .today)
+            try store?.reclassify(scope: .allHistory)
 
             if kind == .ignored {
                 try store?.ignoreSegment(id: segment.id)

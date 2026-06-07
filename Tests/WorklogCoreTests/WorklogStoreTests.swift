@@ -128,6 +128,40 @@ struct WorklogStoreTests {
     }
 
     @Test
+    func reviewSegmentsReturnsEntireBacklogNewestFirst() throws {
+        let store = try makeStore()
+        let olderSegment = segment(url: "https://older.example.com", offset: -172_800)
+        let newerSegment = segment(url: "https://newer.example.com", offset: -86_400)
+
+        try store.save(
+            segment: olderSegment,
+            classification: SegmentClassification(
+                segmentID: olderSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.save(
+            segment: newerSegment,
+            classification: SegmentClassification(
+                segmentID: newerSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+
+        let reviewSegments = try store.reviewSegments()
+
+        #expect(reviewSegments.map(\.id) == [newerSegment.id, olderSegment.id])
+    }
+
+    @Test
     func saveCategoryKeepsExistingActivityAttached() throws {
         let store = try makeStore()
         let segment = segment(url: "https://example.com")

@@ -80,7 +80,7 @@ private struct ReviewTab: View {
     var body: some View {
         List {
             if appState.reviewSegments.isEmpty {
-                Text("No review items today")
+                Text("No review items")
                     .foregroundStyle(.secondary)
             }
 
@@ -90,6 +90,9 @@ private struct ReviewTab: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.segment.appName)
                                 .font(.headline)
+                            Text(item.segment.startedAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             Text(item.segment.windowTitle.isEmpty ? "Untitled" : item.segment.windowTitle)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(2)
