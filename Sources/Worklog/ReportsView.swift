@@ -117,12 +117,6 @@ struct ReportsView: View {
                 color: .green
             )
             ReportMetricCard(
-                title: "Review",
-                value: formatter.compactDuration(report.reviewSeconds),
-                delta: durationDelta(report.reviewSeconds, previous.reviewSeconds),
-                color: .orange
-            )
-            ReportMetricCard(
                 title: "Total",
                 value: formatter.compactDuration(report.totalSeconds),
                 delta: durationDelta(report.totalSeconds, previous.totalSeconds),
