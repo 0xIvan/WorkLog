@@ -82,6 +82,56 @@ struct ActivityClassifierTests {
         #expect(result.kind == .review)
     }
 
+    @Test
+    func generatedBrowserAppRuleDoesNotOverrideReview() {
+        let result = classifier.classify(
+            snapshot: snapshot(
+                appName: "Google Chrome",
+                title: "Different host",
+                url: "https://different.example.com"
+            ),
+            rules: [
+                Rule(
+                    name: "Remember Google Chrome",
+                    priority: 150,
+                    enabled: true,
+                    isBuiltIn: false,
+                    action: RuleAction(kind: .ignored, categoryID: nil, projectID: nil),
+                    conditions: [
+                        RuleCondition(field: .appName, operation: .equals, value: "Google Chrome")
+                    ]
+                )
+            ]
+        )
+
+        #expect(result.kind == .review)
+    }
+
+    @Test
+    func explicitBrowserAppRuleStillApplies() {
+        let result = classifier.classify(
+            snapshot: snapshot(
+                appName: "Google Chrome",
+                title: "Different host",
+                url: "https://different.example.com"
+            ),
+            rules: [
+                Rule(
+                    name: "Ignore all Chrome",
+                    priority: 150,
+                    enabled: true,
+                    isBuiltIn: false,
+                    action: RuleAction(kind: .ignored, categoryID: nil, projectID: nil),
+                    conditions: [
+                        RuleCondition(field: .appName, operation: .equals, value: "Google Chrome")
+                    ]
+                )
+            ]
+        )
+
+        #expect(result.kind == .ignored)
+    }
+
     private func snapshot(
         appName: String,
         bundleIdentifier: String? = nil,

@@ -25,6 +25,7 @@ final class AppState: ObservableObject {
     private let reader = ActiveWindowReader()
     private let idleMonitor = IdleMonitor()
     private let classifier = ActivityClassifier()
+    private let rememberedRuleFactory = RememberedRuleFactory()
     private let formatter = TimeFormatting()
     private var store: WorklogStore?
     private var timer: Timer?
@@ -225,8 +226,10 @@ final class AppState: ObservableObject {
         let categoryID = categories.first { $0.kind == kind }?.id
 
         do {
-            try createRememberedRule(from: segment, kind: kind, categoryID: categoryID)
-            try store?.reclassify(scope: .allHistory)
+            if let rule = rememberedRuleFactory.rule(from: segment, kind: kind, categoryID: categoryID) {
+                try store?.saveRememberedRule(rule)
+                try store?.reclassify(scope: .allHistory)
+            }
 
             if kind == .ignored {
                 try store?.ignoreSegment(id: segment.id)
@@ -270,34 +273,6 @@ final class AppState: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
-    }
-
-    private func createRememberedRule(
-        from segment: ClassifiedSegment,
-        kind: ActivityKind,
-        categoryID: UUID?
-    ) throws {
-        let snapshot = segment.segment.snapshot
-        let condition: RuleCondition
-
-        if !snapshot.host.isEmpty {
-            condition = RuleCondition(field: .host, operation: .equals, value: snapshot.host)
-        } else if !snapshot.windowTitle.isEmpty {
-            condition = RuleCondition(field: .windowTitle, operation: .contains, value: snapshot.windowTitle)
-        } else {
-            condition = RuleCondition(field: .appName, operation: .equals, value: snapshot.appName)
-        }
-
-        let rule = Rule(
-            name: "Remember \(condition.value)",
-            priority: 150,
-            enabled: true,
-            isBuiltIn: false,
-            action: RuleAction(kind: kind, categoryID: categoryID, projectID: segment.classification.projectID),
-            conditions: [condition]
-        )
-
-        try store?.saveRememberedRule(rule)
     }
 
     private func hideFromDockIfNoWindowsAreOpen() {

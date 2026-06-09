@@ -14,6 +14,7 @@ public struct ActivityClassifier {
 
         let sortedRules = rules
             .filter(\.enabled)
+            .filter { !isUnsafeRememberedBrowserAppRule($0) }
             .sorted { first, second in
                 if first.priority == second.priority {
                     return first.name.localizedCaseInsensitiveCompare(second.name) == .orderedAscending
@@ -98,6 +99,23 @@ public struct ActivityClassifier {
             || bundle.contains("safari")
             || bundle.contains("arc")
             || bundle.contains("firefox")
+    }
+
+    private func isUnsafeRememberedBrowserAppRule(_ rule: Rule) -> Bool {
+        guard !rule.isBuiltIn,
+              rule.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("remember "),
+              rule.conditions.count == 1,
+              let condition = rule.conditions.first,
+              condition.operation == .equals,
+              condition.field == .appName || condition.field == .bundleIdentifier else {
+            return false
+        }
+
+        let value = condition.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return value.contains("chrome")
+            || value.contains("safari")
+            || value.contains("arc")
+            || value.contains("firefox")
     }
 
     private func isSystemSnapshot(snapshot: ActivitySnapshot) -> Bool {
