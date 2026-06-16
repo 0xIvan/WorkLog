@@ -227,8 +227,9 @@ final class AppState: ObservableObject {
 
         do {
             if let rule = rememberedRuleFactory.rule(from: segment, kind: kind, categoryID: categoryID) {
-                try store?.saveRememberedRule(rule)
-                try store?.reclassify(scope: .allHistory)
+                if let ruleID = try store?.saveRememberedRule(rule) {
+                    try store?.reclassify(ruleID: ruleID, scope: .allHistory)
+                }
             }
 
             if kind == .ignored {

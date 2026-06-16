@@ -4,15 +4,11 @@ public struct ActivityClassifier {
     public init() {}
 
     public func classify(snapshot: ActivitySnapshot, rules: [Rule]) -> ClassificationResult {
-        if snapshot.isPrivate {
-            return ClassificationResult(kind: .ignored, categoryID: nil, projectID: nil, ruleID: nil)
-        }
+        classify(snapshot: snapshot, preparedRules: preparedRules(from: rules))
+    }
 
-        if isSystemSnapshot(snapshot: snapshot) {
-            return ClassificationResult(kind: .ignored, categoryID: nil, projectID: nil, ruleID: nil)
-        }
-
-        let sortedRules = rules
+    public func preparedRules(from rules: [Rule]) -> [Rule] {
+        rules
             .filter(\.enabled)
             .filter { !isUnsafeRememberedBrowserAppRule($0) }
             .sorted { first, second in
@@ -22,8 +18,18 @@ public struct ActivityClassifier {
 
                 return first.priority < second.priority
             }
+    }
 
-        if let rule = sortedRules.first(where: { matches(rule: $0, snapshot: snapshot) }) {
+    public func classify(snapshot: ActivitySnapshot, preparedRules: [Rule]) -> ClassificationResult {
+        if snapshot.isPrivate {
+            return ClassificationResult(kind: .ignored, categoryID: nil, projectID: nil, ruleID: nil)
+        }
+
+        if isSystemSnapshot(snapshot: snapshot) {
+            return ClassificationResult(kind: .ignored, categoryID: nil, projectID: nil, ruleID: nil)
+        }
+
+        if let rule = preparedRules.first(where: { matches(rule: $0, snapshot: snapshot) }) {
             return ClassificationResult(
                 kind: rule.action.kind,
                 categoryID: rule.action.categoryID,

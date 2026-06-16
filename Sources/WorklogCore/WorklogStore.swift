@@ -46,6 +46,17 @@ private enum SQLiteValue {
     case bool(Bool)
 }
 
+private struct ReclassificationCandidate {
+    var segment: ActivitySegment
+    var classification: SegmentClassification
+}
+
+private struct SQLPredicate {
+    var sql: String
+    var bindings: [SQLiteValue]
+    var indexName: String?
+}
+
 public final class WorklogStore {
     private var database: OpaquePointer?
     private let classifier = ActivityClassifier()
@@ -102,9 +113,14 @@ public final class WorklogStore {
                 process_id,
                 window_title,
                 url,
-                source
+                source,
+                host,
+                app_name_normalized,
+                bundle_id_normalized,
+                window_title_normalized,
+                url_normalized
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             bindings: [
                 .text(segment.id.uuidString),
@@ -115,7 +131,12 @@ public final class WorklogStore {
                 .integer(Int(segment.processIdentifier)),
                 .text(segment.windowTitle),
                 .text(segment.url),
-                .text(segment.source.rawValue)
+                .text(segment.source.rawValue),
+                .text(host(from: segment.url)),
+                .text(normalizedSearchValue(segment.appName)),
+                .text(normalizedSearchValue(segment.bundleIdentifier)),
+                .text(normalizedSearchValue(segment.windowTitle)),
+                .text(normalizedSearchValue(segment.url))
             ]
         )
 
@@ -363,30 +384,37 @@ public final class WorklogStore {
             startDate = nil
         }
 
-        let rules = try loadRules()
-        let segments = try loadSegments(startDate: startDate)
+        try transaction {
+            let rules = classifier.preparedRules(from: try loadRules())
+            let candidates = try reclassificationCandidates(startDate: startDate)
 
-        for segment in segments {
-            guard let existing = try loadClassification(segmentID: segment.id), !existing.isManual else {
-                continue
+            for candidate in candidates {
+                let result = classifier.classify(snapshot: candidate.segment.snapshot, preparedRules: rules)
+                try applyReclassificationResult(result, to: candidate)
+            }
+        }
+    }
+
+    public func reclassify(ruleID: UUID, scope: ReclassificationScope) throws {
+        let startDate: Date?
+        switch scope {
+        case .today:
+            startDate = dayInterval(for: Date()).start
+        case .allHistory:
+            startDate = nil
+        }
+
+        try transaction {
+            let rules = classifier.preparedRules(from: try loadRules())
+            guard let rule = rules.first(where: { $0.id == ruleID }) else {
+                return
             }
 
-            let result = classifier.classify(snapshot: segment.snapshot, rules: rules)
-            if result.kind == .ignored {
-                try deleteSegment(id: segment.id)
-                continue
+            let candidates = try reclassificationCandidates(matching: rule, startDate: startDate)
+            for candidate in candidates where classifier.matches(rule: rule, snapshot: candidate.segment.snapshot) {
+                let result = classifier.classify(snapshot: candidate.segment.snapshot, preparedRules: rules)
+                try applyReclassificationResult(result, to: candidate)
             }
-
-            try saveClassification(
-                SegmentClassification(
-                    segmentID: segment.id,
-                    kind: result.kind,
-                    categoryID: result.categoryID,
-                    projectID: result.projectID,
-                    ruleID: result.ruleID,
-                    isManual: false
-                )
-            )
         }
     }
 
@@ -413,7 +441,7 @@ public final class WorklogStore {
                 continue
             }
 
-            appDurations[item.segment.appName, default: 0] += duration
+            appDurations[appBucketName(for: item.segment), default: 0] += duration
 
             if let projectName = item.projectName {
                 projectDurations[projectName, default: 0] += duration
@@ -621,10 +649,41 @@ public final class WorklogStore {
                 process_id INTEGER NOT NULL,
                 window_title TEXT NOT NULL,
                 url TEXT,
-                source TEXT NOT NULL
+                source TEXT NOT NULL,
+                host TEXT NOT NULL DEFAULT '',
+                app_name_normalized TEXT NOT NULL DEFAULT '',
+                bundle_id_normalized TEXT NOT NULL DEFAULT '',
+                window_title_normalized TEXT NOT NULL DEFAULT '',
+                url_normalized TEXT NOT NULL DEFAULT ''
             )
             """
         )
+
+        var addedSearchColumn = false
+        addedSearchColumn = try addActivitySegmentColumnIfMissing(
+            name: "host",
+            definition: "TEXT NOT NULL DEFAULT ''"
+        ) || addedSearchColumn
+        addedSearchColumn = try addActivitySegmentColumnIfMissing(
+            name: "app_name_normalized",
+            definition: "TEXT NOT NULL DEFAULT ''"
+        ) || addedSearchColumn
+        addedSearchColumn = try addActivitySegmentColumnIfMissing(
+            name: "bundle_id_normalized",
+            definition: "TEXT NOT NULL DEFAULT ''"
+        ) || addedSearchColumn
+        addedSearchColumn = try addActivitySegmentColumnIfMissing(
+            name: "window_title_normalized",
+            definition: "TEXT NOT NULL DEFAULT ''"
+        ) || addedSearchColumn
+        addedSearchColumn = try addActivitySegmentColumnIfMissing(
+            name: "url_normalized",
+            definition: "TEXT NOT NULL DEFAULT ''"
+        ) || addedSearchColumn
+
+        if addedSearchColumn {
+            try backfillSegmentSearchColumns()
+        }
 
         try execute(
             """
@@ -645,6 +704,16 @@ public final class WorklogStore {
 
         try execute("CREATE INDEX IF NOT EXISTS activity_segments_started_at_idx ON activity_segments(started_at)")
         try execute("CREATE INDEX IF NOT EXISTS activity_segments_ended_at_idx ON activity_segments(ended_at)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_host_idx ON activity_segments(host)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_url_idx ON activity_segments(url)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_app_name_idx ON activity_segments(app_name)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_bundle_id_idx ON activity_segments(bundle_id)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_app_name_normalized_idx ON activity_segments(app_name_normalized)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_bundle_id_normalized_idx ON activity_segments(bundle_id_normalized)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_window_title_normalized_idx ON activity_segments(window_title_normalized)")
+        try execute("CREATE INDEX IF NOT EXISTS activity_segments_url_normalized_idx ON activity_segments(url_normalized)")
+        try execute("CREATE INDEX IF NOT EXISTS classifications_kind_idx ON classifications(kind)")
+        try execute("CREATE INDEX IF NOT EXISTS classifications_is_manual_idx ON classifications(is_manual)")
         try execute("CREATE INDEX IF NOT EXISTS rules_priority_idx ON rules(priority)")
         try deleteSystemSegments()
     }
@@ -674,6 +743,63 @@ public final class WorklogStore {
             intColumn(statement, 0)
         }
         .first ?? 0
+    }
+
+    private func columnExists(table: String, column: String) throws -> Bool {
+        try query("PRAGMA table_info(\(table))") { statement in
+            stringColumn(statement, 1)
+        }
+        .contains(column)
+    }
+
+    private func addActivitySegmentColumnIfMissing(name: String, definition: String) throws -> Bool {
+        guard try !columnExists(table: "activity_segments", column: name) else {
+            return false
+        }
+
+        try execute("ALTER TABLE activity_segments ADD COLUMN \(name) \(definition)")
+        return true
+    }
+
+    private func backfillSegmentSearchColumns() throws {
+        let rows = try query(
+            """
+            SELECT id, app_name, bundle_id, window_title, url
+            FROM activity_segments
+            """
+        ) { statement in
+            (
+                id: uuidColumn(statement, 0),
+                appName: stringColumn(statement, 1),
+                bundleIdentifier: stringColumn(statement, 2),
+                windowTitle: stringColumn(statement, 3),
+                url: optionalStringColumn(statement, 4)
+            )
+        }
+
+        try transaction {
+            for row in rows {
+                try execute(
+                    """
+                    UPDATE activity_segments
+                    SET host = ?,
+                        app_name_normalized = ?,
+                        bundle_id_normalized = ?,
+                        window_title_normalized = ?,
+                        url_normalized = ?
+                    WHERE id = ?
+                    """,
+                    bindings: [
+                        .text(host(from: row.url)),
+                        .text(normalizedSearchValue(row.appName)),
+                        .text(normalizedSearchValue(row.bundleIdentifier)),
+                        .text(normalizedSearchValue(row.windowTitle)),
+                        .text(normalizedSearchValue(row.url)),
+                        .text(row.id.uuidString)
+                    ]
+                )
+            }
+        }
     }
 
     private func loadConditions(ruleID: UUID) throws -> [RuleCondition] {
@@ -752,6 +878,152 @@ public final class WorklogStore {
                 OR lower(bundle_id) = 'com.apple.loginwindow'
             """
         )
+    }
+
+    private func applyReclassificationResult(
+        _ result: ClassificationResult,
+        to candidate: ReclassificationCandidate
+    ) throws {
+        if result.kind == .ignored {
+            try deleteSegment(id: candidate.segment.id)
+            return
+        }
+
+        let classification = SegmentClassification(
+            segmentID: candidate.segment.id,
+            kind: result.kind,
+            categoryID: result.categoryID,
+            projectID: result.projectID,
+            ruleID: result.ruleID,
+            isManual: false
+        )
+
+        guard classification != candidate.classification else {
+            return
+        }
+
+        try saveClassification(classification)
+    }
+
+    private func reclassificationCandidates(startDate: Date?) throws -> [ReclassificationCandidate] {
+        try reclassificationCandidates(startDate: startDate, predicate: nil)
+    }
+
+    private func reclassificationCandidates(matching rule: Rule, startDate: Date?) throws -> [ReclassificationCandidate] {
+        try reclassificationCandidates(startDate: startDate, predicate: reclassificationPredicate(for: rule))
+    }
+
+    private func reclassificationCandidates(
+        startDate: Date?,
+        predicate: SQLPredicate?
+    ) throws -> [ReclassificationCandidate] {
+        var clauses = ["c.is_manual = 0"]
+        var bindings: [SQLiteValue] = []
+
+        if let startDate {
+            clauses.append("s.started_at >= ?")
+            bindings.append(.double(startDate.timeIntervalSince1970))
+        }
+
+        if let predicate {
+            clauses.append(predicate.sql)
+            bindings.append(contentsOf: predicate.bindings)
+        }
+
+        let whereClause = clauses.joined(separator: " AND ")
+        let indexHint = predicate?.indexName.map { "INDEXED BY \($0)" } ?? ""
+
+        return try query(
+            """
+            SELECT
+                s.id,
+                s.started_at,
+                s.ended_at,
+                s.app_name,
+                s.bundle_id,
+                s.process_id,
+                s.window_title,
+                s.url,
+                s.source,
+                c.segment_id,
+                c.kind,
+                c.category_id,
+                c.project_id,
+                c.rule_id,
+                c.is_manual
+            FROM activity_segments AS s \(indexHint)
+            JOIN classifications c ON c.segment_id = s.id
+            WHERE \(whereClause)
+            ORDER BY s.started_at ASC
+            """,
+            bindings: bindings
+        ) { statement in
+            reclassificationCandidateColumn(statement)
+        }
+    }
+
+    private func reclassificationPredicate(for rule: Rule) -> SQLPredicate? {
+        guard rule.conditions.count == 1, let condition = rule.conditions.first else {
+            return nil
+        }
+
+        let value = normalizedSearchValue(condition.value)
+        guard !value.isEmpty else {
+            return nil
+        }
+
+        let expression: String
+        let indexName: String
+        switch condition.field {
+        case .appName:
+            expression = "s.app_name_normalized"
+            indexName = "activity_segments_app_name_normalized_idx"
+        case .bundleIdentifier:
+            expression = "s.bundle_id_normalized"
+            indexName = "activity_segments_bundle_id_normalized_idx"
+        case .windowTitle:
+            expression = "s.window_title_normalized"
+            indexName = "activity_segments_window_title_normalized_idx"
+        case .url:
+            expression = "s.url_normalized"
+            indexName = "activity_segments_url_normalized_idx"
+        case .host:
+            expression = "s.host"
+            indexName = "activity_segments_host_idx"
+        }
+
+        switch condition.operation {
+        case .contains:
+            return SQLPredicate(
+                sql: "\(expression) LIKE ? ESCAPE '\\'",
+                bindings: [.text("%\(escapedLikeValue(value))%")],
+                indexName: nil
+            )
+        case .equals:
+            return SQLPredicate(sql: "\(expression) = ?", bindings: [.text(value)], indexName: indexName)
+        case .startsWith:
+            if let upperBound = searchUpperBound(afterPrefix: value) {
+                return SQLPredicate(
+                    sql: "\(expression) >= ? AND \(expression) < ?",
+                    bindings: [.text(value), .text(upperBound)],
+                    indexName: indexName
+                )
+            }
+
+            return SQLPredicate(
+                sql: "\(expression) LIKE ? ESCAPE '\\'",
+                bindings: [.text("\(escapedLikeValue(value))%")],
+                indexName: indexName
+            )
+        case .endsWith:
+            return SQLPredicate(
+                sql: "\(expression) LIKE ? ESCAPE '\\'",
+                bindings: [.text("%\(escapedLikeValue(value))")],
+                indexName: nil
+            )
+        case .regex:
+            return nil
+        }
     }
 
     private func loadSegments(startDate: Date?) throws -> [ActivitySegment] {
@@ -881,7 +1153,7 @@ public final class WorklogStore {
                 continue
             }
 
-            appDurations[item.segment.appName, default: 0] += duration
+            appDurations[appBucketName(for: item.segment), default: 0] += duration
 
             if let projectName = item.projectName {
                 projectDurations[projectName, default: 0] += duration
@@ -940,12 +1212,76 @@ public final class WorklogStore {
     private func buckets(from durations: [String: TimeInterval], kind: ActivityKind) -> [TimeBucket] {
         durations
             .sorted { first, second in
-                first.value > second.value
+                if first.value == second.value {
+                    return first.key.localizedCaseInsensitiveCompare(second.key) == .orderedAscending
+                }
+
+                return first.value > second.value
             }
             .prefix(8)
             .map { name, seconds in
                 TimeBucket(id: "\(kind.rawValue)-\(name)", name: name, seconds: seconds, kind: kind)
             }
+    }
+
+    private func appBucketName(for segment: ActivitySegment) -> String {
+        let host = segment.snapshot.host
+        guard segment.source == .chrome, !host.isEmpty else {
+            return segment.appName
+        }
+
+        return host
+    }
+
+    private func host(from url: String?) -> String {
+        guard let url = url?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else {
+            return ""
+        }
+
+        return URL(string: url)?.host?.lowercased() ?? ""
+    }
+
+    private func normalizedSearchValue(_ value: String?) -> String {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+    }
+
+    private func escapedLikeValue(_ value: String) -> String {
+        var escaped = ""
+        for character in value {
+            if character == "%" || character == "_" || character == "\\" {
+                escaped.append("\\")
+            }
+
+            escaped.append(character)
+        }
+
+        return escaped
+    }
+
+    private func searchUpperBound(afterPrefix prefix: String) -> String? {
+        var scalars = Array(prefix.unicodeScalars)
+        guard let last = scalars.popLast(),
+              last.value < UInt32.max,
+              let next = UnicodeScalar(last.value + 1) else {
+            return nil
+        }
+
+        scalars.append(next)
+        return String(String.UnicodeScalarView(scalars))
+    }
+
+    private func transaction(_ work: () throws -> Void) throws {
+        try execute("BEGIN IMMEDIATE TRANSACTION")
+
+        do {
+            try work()
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
     }
 
     private func execute(_ sql: String, bindings: [SQLiteValue] = []) throws {
@@ -1103,6 +1439,20 @@ private func classifiedSegmentColumn(_ statement: OpaquePointer?) -> ClassifiedS
         projectName: optionalStringColumn(statement, 14),
         categoryName: optionalStringColumn(statement, 15),
         ruleName: optionalStringColumn(statement, 16)
+    )
+}
+
+private func reclassificationCandidateColumn(_ statement: OpaquePointer?) -> ReclassificationCandidate {
+    ReclassificationCandidate(
+        segment: activitySegmentColumn(statement),
+        classification: SegmentClassification(
+            segmentID: uuidColumn(statement, 9),
+            kind: ActivityKind(rawValue: stringColumn(statement, 10)) ?? .review,
+            categoryID: optionalUUIDColumn(statement, 11),
+            projectID: optionalUUIDColumn(statement, 12),
+            ruleID: optionalUUIDColumn(statement, 13),
+            isManual: boolColumn(statement, 14)
+        )
     )
 }
 

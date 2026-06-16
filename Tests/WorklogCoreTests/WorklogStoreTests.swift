@@ -53,6 +53,200 @@ struct WorklogStoreTests {
     }
 
     @Test
+    func reclassifyRuleUpdatesMatchingHistoryOnly() throws {
+        let store = try makeStore()
+        let baseDate = middayToday()
+        let matchingSegment = segment(url: "https://clerk.com/docs", startedAt: baseDate)
+        let otherSegment = segment(url: "https://x.com/home", offset: 600, startedAt: baseDate)
+        let rule = rememberedRule(id: "AAAAAAAA-0000-0000-0000-000000000001")
+
+        try store.save(
+            segment: matchingSegment,
+            classification: SegmentClassification(
+                segmentID: matchingSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.save(
+            segment: otherSegment,
+            classification: SegmentClassification(
+                segmentID: otherSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.saveRule(rule)
+
+        try store.reclassify(ruleID: rule.id, scope: .allHistory)
+
+        let classifications = try classificationsBySegmentID(store: store, date: baseDate)
+        #expect(classifications[matchingSegment.id]?.kind == .work)
+        #expect(classifications[matchingSegment.id]?.ruleID == rule.id)
+        #expect(classifications[otherSegment.id]?.kind == .review)
+    }
+
+    @Test
+    func reclassifyRulePreservesHigherPriorityRulesForMatchingHistory() throws {
+        let store = try makeStore()
+        let baseDate = middayToday()
+        let matchingSegment = segment(url: "https://clerk.com/docs", startedAt: baseDate)
+        let higherPriorityRule = Rule(
+            id: UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000001")!,
+            name: "Clerk is personal",
+            priority: 100,
+            enabled: true,
+            isBuiltIn: false,
+            action: RuleAction(kind: .personal, categoryID: SeedData.personalCategoryID, projectID: nil),
+            conditions: [
+                RuleCondition(field: .host, operation: .equals, value: "clerk.com")
+            ]
+        )
+        let lowerPriorityRule = rememberedRule(id: "AAAAAAAA-0000-0000-0000-000000000001")
+
+        try store.save(
+            segment: matchingSegment,
+            classification: SegmentClassification(
+                segmentID: matchingSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.saveRule(higherPriorityRule)
+        try store.saveRule(lowerPriorityRule)
+
+        try store.reclassify(ruleID: lowerPriorityRule.id, scope: .allHistory)
+
+        let classifications = try classificationsBySegmentID(store: store, date: baseDate)
+        #expect(classifications[matchingSegment.id]?.kind == .personal)
+        #expect(classifications[matchingSegment.id]?.ruleID == higherPriorityRule.id)
+    }
+
+    @Test
+    func reclassifyRuleUpdatesExactURLMatches() throws {
+        let store = try makeStore()
+        let baseDate = middayToday()
+        let matchingSegment = segment(url: "file:///Users/Ivan/Preview.html", startedAt: baseDate)
+        let otherSegment = segment(url: "file:///Users/Ivan/Other.html", offset: 600, startedAt: baseDate)
+        let rule = Rule(
+            id: UUID(uuidString: "CCCCCCCC-0000-0000-0000-000000000001")!,
+            name: "Remember local preview",
+            priority: 150,
+            enabled: true,
+            isBuiltIn: false,
+            action: RuleAction(kind: .work, categoryID: SeedData.workCategoryID, projectID: nil),
+            conditions: [
+                RuleCondition(field: .url, operation: .equals, value: "file:///users/ivan/preview.html")
+            ]
+        )
+
+        try store.save(
+            segment: matchingSegment,
+            classification: SegmentClassification(
+                segmentID: matchingSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.save(
+            segment: otherSegment,
+            classification: SegmentClassification(
+                segmentID: otherSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.saveRule(rule)
+
+        try store.reclassify(ruleID: rule.id, scope: .allHistory)
+
+        let classifications = try classificationsBySegmentID(store: store, date: baseDate)
+        #expect(classifications[matchingSegment.id]?.kind == .work)
+        #expect(classifications[matchingSegment.id]?.ruleID == rule.id)
+        #expect(classifications[otherSegment.id]?.kind == .review)
+    }
+
+    @Test
+    func reclassifyRuleUpdatesAppNameMatches() throws {
+        let store = try makeStore()
+        let baseDate = middayToday()
+        let matchingSegment = segment(
+            appName: "Linear",
+            bundleIdentifier: "com.linear",
+            windowTitle: "Issue list",
+            url: nil,
+            source: .macOS,
+            startedAt: baseDate
+        )
+        let otherSegment = segment(
+            appName: "Finder",
+            bundleIdentifier: "com.apple.finder",
+            windowTitle: "Downloads",
+            url: nil,
+            source: .macOS,
+            offset: 600,
+            startedAt: baseDate
+        )
+        let rule = Rule(
+            id: UUID(uuidString: "DDDDDDDD-0000-0000-0000-000000000001")!,
+            name: "Remember Linear",
+            priority: 150,
+            enabled: true,
+            isBuiltIn: false,
+            action: RuleAction(kind: .work, categoryID: SeedData.workCategoryID, projectID: nil),
+            conditions: [
+                RuleCondition(field: .appName, operation: .equals, value: "linear")
+            ]
+        )
+
+        try store.save(
+            segment: matchingSegment,
+            classification: SegmentClassification(
+                segmentID: matchingSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.save(
+            segment: otherSegment,
+            classification: SegmentClassification(
+                segmentID: otherSegment.id,
+                kind: .review,
+                categoryID: nil,
+                projectID: nil,
+                ruleID: nil,
+                isManual: false
+            )
+        )
+        try store.saveRule(rule)
+
+        try store.reclassify(ruleID: rule.id, scope: .allHistory)
+
+        let classifications = try classificationsBySegmentID(store: store, date: baseDate)
+        #expect(classifications[matchingSegment.id]?.kind == .work)
+        #expect(classifications[matchingSegment.id]?.ruleID == rule.id)
+        #expect(classifications[otherSegment.id]?.kind == .review)
+    }
+
+    @Test
     func saveRememberedRuleDoesNotCreateDuplicates() throws {
         let store = try makeStore()
 
@@ -125,6 +319,33 @@ struct WorklogStoreTests {
         #expect(activitySegments.count == 1)
         #expect(activitySegments.first?.classification.kind == .personal)
         #expect(activitySegments.first?.classification.isManual == true)
+    }
+
+    @Test
+    func daySummaryAggregatesChromeActivityByHost() throws {
+        let store = try makeStore()
+        let firstSegment = segment(url: "https://clerk.com/docs")
+        let secondSegment = segment(url: "https://clerk.com/dashboard", offset: 600)
+        let thirdSegment = segment(url: "https://x.com/home", offset: 1_200)
+
+        for segment in [firstSegment, secondSegment, thirdSegment] {
+            try store.save(
+                segment: segment,
+                classification: SegmentClassification(
+                    segmentID: segment.id,
+                    kind: .work,
+                    categoryID: SeedData.workCategoryID,
+                    projectID: nil,
+                    ruleID: nil,
+                    isManual: false
+                )
+            )
+        }
+
+        let summary = try store.daySummary(for: Date())
+
+        #expect(summary.topApps.map(\.name) == ["clerk.com", "x.com"])
+        #expect(summary.topApps.map(\.seconds) == [240, 120])
     }
 
     @Test
@@ -229,7 +450,8 @@ struct WorklogStoreTests {
         #expect(report.personalSeconds == 120)
         #expect(report.totalSeconds == 240)
         #expect(report.buckets.count == 7)
-        #expect(report.topApps.first?.seconds == 240)
+        #expect(report.topApps.map(\.name) == ["example.com", "x.com"])
+        #expect(report.topApps.map(\.seconds) == [120, 120])
         #expect(previousReport.totalSeconds == 0)
     }
 
@@ -241,16 +463,39 @@ struct WorklogStoreTests {
         return try WorklogStore(databaseURL: directory.appendingPathComponent("worklog.sqlite"))
     }
 
-    private func segment(url: String, offset: TimeInterval = 0) -> ActivitySegment {
-        let start = Date().addingTimeInterval(offset)
+    private func classificationsBySegmentID(
+        store: WorklogStore,
+        date: Date
+    ) throws -> [UUID: SegmentClassification] {
+        try Dictionary(
+            uniqueKeysWithValues: store.activitySegments(for: date).map { item in
+                (item.id, item.classification)
+            }
+        )
+    }
+
+    private func middayToday() -> Date {
+        Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    private func segment(
+        appName: String = "Google Chrome",
+        bundleIdentifier: String = "com.google.Chrome",
+        windowTitle: String = "Clerk",
+        url: String?,
+        source: ActivitySource = .chrome,
+        offset: TimeInterval = 0,
+        startedAt: Date = Date()
+    ) -> ActivitySegment {
+        let start = startedAt.addingTimeInterval(offset)
         let end = start.addingTimeInterval(120)
         let snapshot = ActivitySnapshot(
-            appName: "Google Chrome",
-            bundleIdentifier: "com.google.Chrome",
+            appName: appName,
+            bundleIdentifier: bundleIdentifier,
             processIdentifier: 1,
-            windowTitle: "Clerk",
+            windowTitle: windowTitle,
             url: url,
-            source: .chrome
+            source: source
         )
 
         return ActivitySegment(startedAt: start, endedAt: end, snapshot: snapshot)
