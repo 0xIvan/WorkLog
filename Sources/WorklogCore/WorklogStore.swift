@@ -736,6 +736,22 @@ public final class WorklogStore {
                 try saveRule(rule)
             }
         }
+
+        try insertMissingBuiltInRules()
+    }
+
+    private func insertMissingBuiltInRules() throws {
+        let existingRuleIDs = Set(try loadRules().map(\.id))
+        var insertedRuleIDs: [UUID] = []
+
+        for rule in SeedData.rules where rule.isBuiltIn && !existingRuleIDs.contains(rule.id) {
+            try saveRule(rule)
+            insertedRuleIDs.append(rule.id)
+        }
+
+        for ruleID in insertedRuleIDs {
+            try reclassify(ruleID: ruleID, scope: .allHistory)
+        }
     }
 
     private func count(table: String) throws -> Int {

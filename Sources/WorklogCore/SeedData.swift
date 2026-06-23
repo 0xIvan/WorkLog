@@ -58,7 +58,19 @@ public enum SeedData {
             rule(id: "20000000-0000-0000-0000-000000000010", name: "Warp is work", priority: 200, kind: .work, field: .appName, operation: .contains, value: "Warp"),
             rule(id: "20000000-0000-0000-0000-000000000011", name: "Localhost is work", priority: 120, kind: .work, field: .host, operation: .equals, value: "localhost"),
             rule(id: "20000000-0000-0000-0000-000000000012", name: "127.0.0.1 is work", priority: 120, kind: .work, field: .host, operation: .equals, value: "127.0.0.1"),
-            rule(id: "20000000-0000-0000-0000-000000000013", name: "IPv6 localhost is work", priority: 120, kind: .work, field: .url, operation: .contains, value: "[::1]")
+            rule(id: "20000000-0000-0000-0000-000000000013", name: "IPv6 localhost is work", priority: 120, kind: .work, field: .url, operation: .contains, value: "[::1]"),
+            Rule(
+                id: UUID(uuidString: "20000000-0000-0000-0000-000000000014")!,
+                name: "Discord Jian Yang #work is work",
+                priority: 180,
+                enabled: true,
+                isBuiltIn: true,
+                action: RuleAction(kind: .work, categoryID: workCategoryID, projectID: nil),
+                conditions: [
+                    RuleCondition(field: .appName, operation: .contains, value: "Discord"),
+                    RuleCondition(field: .windowTitle, operation: .contains, value: "#work | Jian Yang")
+                ]
+            )
         ]
     }
 

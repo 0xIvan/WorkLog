@@ -39,6 +39,27 @@ struct ActivityClassifierTests {
     }
 
     @Test
+    func discordJianYangWorkChannelIsWork() {
+        let result = classifier.classify(
+            snapshot: snapshot(appName: "Discord", title: "#work | Jian Yang - Discord"),
+            rules: rules
+        )
+
+        #expect(result.kind == .work)
+        #expect(result.categoryID == SeedData.workCategoryID)
+    }
+
+    @Test
+    func otherDiscordChannelsArePersonal() {
+        let result = classifier.classify(
+            snapshot: snapshot(appName: "Discord", title: "#general | Jian Yang - Discord"),
+            rules: rules
+        )
+
+        #expect(result.kind == .personal)
+    }
+
+    @Test
     func chromeExtensionPagesAreIgnored() {
         let result = classifier.classify(
             snapshot: snapshot(

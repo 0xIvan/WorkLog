@@ -292,6 +292,45 @@ struct WorklogStoreTests {
     }
 
     @Test
+    func startupAddsMissingBuiltInRulesAndReclassifiesHistory() throws {
+        let databaseURL = try temporaryDatabaseURL()
+        let segment = segment(
+            appName: "Discord",
+            bundleIdentifier: "com.hnc.Discord",
+            windowTitle: "#work | Jian Yang - Discord",
+            url: nil,
+            source: .macOS
+        )
+
+        do {
+            let store = try WorklogStore(databaseURL: databaseURL)
+            let rules = try store.loadRules()
+            let discordWorkRule = try #require(rules.first { $0.name == "Discord Jian Yang #work is work" })
+            try store.deleteRule(id: discordWorkRule.id)
+            try store.save(
+                segment: segment,
+                classification: SegmentClassification(
+                    segmentID: segment.id,
+                    kind: .personal,
+                    categoryID: SeedData.personalCategoryID,
+                    projectID: nil,
+                    ruleID: nil,
+                    isManual: false
+                )
+            )
+        }
+
+        let reopenedStore = try WorklogStore(databaseURL: databaseURL)
+        let rules = try reopenedStore.loadRules()
+        let discordWorkRule = try #require(rules.first { $0.name == "Discord Jian Yang #work is work" })
+        let activitySegments = try reopenedStore.activitySegments(for: Date())
+
+        #expect(activitySegments.first?.classification.kind == .work)
+        #expect(activitySegments.first?.classification.categoryID == SeedData.workCategoryID)
+        #expect(activitySegments.first?.classification.ruleID == discordWorkRule.id)
+    }
+
+    @Test
     func activitySegmentsForDateReflectManualClassificationEdits() throws {
         let store = try makeStore()
         let segment = segment(url: "https://example.com")
@@ -456,11 +495,15 @@ struct WorklogStoreTests {
     }
 
     private func makeStore() throws -> WorklogStore {
+        try WorklogStore(databaseURL: temporaryDatabaseURL())
+    }
+
+    private func temporaryDatabaseURL() throws -> URL {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        return try WorklogStore(databaseURL: directory.appendingPathComponent("worklog.sqlite"))
+        return directory.appendingPathComponent("worklog.sqlite")
     }
 
     private func classificationsBySegmentID(
