@@ -148,6 +148,7 @@ public protocol ReviewAISuggestionProviding: Sendable {
 }
 
 public enum ReviewAISuggestionProviderConfiguration: Equatable, Sendable {
+    case ollama(endpoint: URL, model: String)
     case localHeuristic
     case disabled
 
@@ -155,9 +156,33 @@ public enum ReviewAISuggestionProviderConfiguration: Equatable, Sendable {
         switch environment["WORKLOG_REVIEW_AI_PROVIDER"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "off", "disabled", "none":
             self = .disabled
-        default:
+        case "local", "heuristic", "local-heuristic":
             self = .localHeuristic
+        default:
+            self = .ollama(
+                endpoint: Self.ollamaEndpoint(from: environment),
+                model: Self.ollamaModel(from: environment)
+            )
         }
+    }
+
+    private static func ollamaEndpoint(from environment: [String: String]) -> URL {
+        if let value = environment["WORKLOG_REVIEW_AI_ENDPOINT"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let url = URL(string: value),
+           !value.isEmpty {
+            return url
+        }
+
+        return URL(string: "http://localhost:11434/api/generate")!
+    }
+
+    private static func ollamaModel(from environment: [String: String]) -> String {
+        let value = environment["WORKLOG_REVIEW_AI_MODEL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value, !value.isEmpty else {
+            return "qwen3:4b"
+        }
+
+        return value
     }
 }
 
@@ -166,6 +191,8 @@ public enum ReviewAISuggestionProviderFactory {
         configuration: ReviewAISuggestionProviderConfiguration = ReviewAISuggestionProviderConfiguration()
     ) -> any ReviewAISuggestionProviding {
         switch configuration {
+        case .ollama(let endpoint, let model):
+            OllamaReviewAISuggestionProvider(endpoint: endpoint, model: model)
         case .localHeuristic:
             LocalReviewAISuggestionProvider()
         case .disabled:
@@ -180,6 +207,304 @@ public struct DisabledReviewAISuggestionProvider: ReviewAISuggestionProviding {
     public func suggestions(for request: ReviewAISuggestionRequest) async throws -> [ReviewAISuggestion] {
         []
     }
+}
+
+public struct OllamaReviewAISuggestionProvider: ReviewAISuggestionProviding {
+    public var endpoint: URL
+    public var model: String
+
+    public init(endpoint: URL = URL(string: "http://localhost:11434/api/generate")!, model: String = "qwen3:4b") {
+        self.endpoint = endpoint
+        self.model = model
+    }
+
+    public func suggestions(for request: ReviewAISuggestionRequest) async throws -> [ReviewAISuggestion] {
+        guard !request.groups.isEmpty else {
+            return []
+        }
+
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = 120
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try JSONEncoder().encode(
+            OllamaGenerateRequest(
+                model: model,
+                prompt: prompt(for: request),
+                stream: false,
+                format: OllamaReviewResponseFormat(),
+                think: false,
+                options: OllamaGenerateOptions(temperature: 0)
+            )
+        )
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: urlRequest)
+        } catch {
+            throw OllamaReviewAISuggestionProviderError.requestFailed(error.localizedDescription)
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OllamaReviewAISuggestionProviderError.invalidResponse
+        }
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw OllamaReviewAISuggestionProviderError.httpStatus(httpResponse.statusCode)
+        }
+
+        let generateResponse = try JSONDecoder().decode(OllamaGenerateResponse.self, from: data)
+        let modelResponse = generateResponse.response.trimmingCharacters(in: .whitespacesAndNewlines)
+        let responseText = modelResponse.isEmpty ? generateResponse.thinking?.trimmingCharacters(in: .whitespacesAndNewlines) : modelResponse
+
+        guard let responseText, !responseText.isEmpty else {
+            throw OllamaReviewAISuggestionProviderError.emptyModelResponse
+        }
+
+        return try OllamaReviewAISuggestionMapper.suggestions(from: responseText, for: request)
+    }
+
+    private func prompt(for request: ReviewAISuggestionRequest) throws -> String {
+        let payload = OllamaReviewPromptPayload(
+            groups: request.groups.map { group in
+                OllamaReviewPromptGroup(
+                    groupID: group.id,
+                    ruleField: group.proposedRuleCondition.field.rawValue,
+                    ruleOperation: group.proposedRuleCondition.operation.rawValue,
+                    ruleValue: group.proposedRuleCondition.value,
+                    affectedCount: group.affectedCount,
+                    affectedMinutes: Int((group.affectedDuration / 60).rounded()),
+                    samples: group.samples.map { sample in
+                        OllamaReviewPromptSample(
+                            appName: sample.appName,
+                            bundleIdentifier: sample.bundleIdentifier,
+                            windowTitle: sample.windowTitle,
+                            url: sample.url
+                        )
+                    }
+                )
+            }
+        )
+        let data = try JSONEncoder().encode(payload)
+        let json = String(decoding: data, as: UTF8.self)
+
+        return """
+        You classify grouped local activity Review items for a time tracking app.
+        Return JSON only. Do not include markdown or commentary.
+        For every input group, return one suggestion with the same groupID.
+        Allowed kinds are: work, personal, ignored, unsure.
+        Work means clear job, business, development, productivity, documentation, design, operations, or admin activity.
+        Personal means consumer shopping, entertainment, social media, news, personal finance, travel, or other non-work activity.
+        Use ignored only for OS noise, extensions, blank pages, login windows, or tracking artifacts.
+        Treat consumer ecommerce sites such as Amazon as personal unless the evidence clearly shows business procurement.
+        Use unsure when the evidence is weak or ambiguous.
+        Use confidence from 0.0 to 1.0.
+        Keep reason under 120 characters.
+        The response must include a suggestions array with groupID, kind, confidence, and reason.
+        Input:
+        \(json)
+        """
+    }
+}
+
+public enum OllamaReviewAISuggestionProviderError: Error, LocalizedError, Sendable {
+    case requestFailed(String)
+    case invalidResponse
+    case httpStatus(Int)
+    case emptyModelResponse
+    case invalidModelJSON
+
+    public var errorDescription: String? {
+        switch self {
+        case .requestFailed(let message):
+            "Local AI provider unavailable: \(message)"
+        case .invalidResponse:
+            "Local AI provider returned an invalid response."
+        case .httpStatus(let statusCode):
+            "Local AI provider returned HTTP \(statusCode)."
+        case .emptyModelResponse:
+            "Local AI provider returned an empty response."
+        case .invalidModelJSON:
+            "Local AI provider returned invalid JSON."
+        }
+    }
+}
+
+struct OllamaReviewAISuggestionMapper {
+    static func suggestions(from responseText: String, for request: ReviewAISuggestionRequest) throws -> [ReviewAISuggestion] {
+        guard let data = responseText.data(using: .utf8),
+              let response = try? JSONDecoder().decode(OllamaReviewModelResponse.self, from: data) else {
+            throw OllamaReviewAISuggestionProviderError.invalidModelJSON
+        }
+
+        let modelSuggestionsByID = Dictionary(
+            response.suggestions.map { ($0.groupID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        return request.groups.map { group in
+            guard let modelSuggestion = modelSuggestionsByID[group.id] else {
+                return suggestion(
+                    for: group,
+                    kind: .unsure,
+                    confidence: 0.2,
+                    reason: "Local model did not return a suggestion for this group."
+                )
+            }
+
+            return suggestion(
+                for: group,
+                kind: ReviewAISuggestionKind(rawValue: modelSuggestion.kind.lowercased()) ?? .unsure,
+                confidence: min(max(modelSuggestion.confidence, 0), 1),
+                reason: normalizedReason(modelSuggestion.reason)
+            )
+        }
+        .sorted { first, second in
+            if first.kind == .unsure, second.kind != .unsure {
+                return false
+            }
+
+            if first.kind != .unsure, second.kind == .unsure {
+                return true
+            }
+
+            if first.confidence == second.confidence {
+                return first.affectedDuration > second.affectedDuration
+            }
+
+            return first.confidence > second.confidence
+        }
+    }
+
+    private static func suggestion(
+        for group: ReviewAISuggestionGroup,
+        kind: ReviewAISuggestionKind,
+        confidence: Double,
+        reason: String
+    ) -> ReviewAISuggestion {
+        ReviewAISuggestion(
+            id: group.id,
+            kind: kind,
+            confidence: confidence,
+            reason: reason,
+            proposedRuleCondition: group.proposedRuleCondition,
+            affectedCount: group.affectedCount,
+            affectedDuration: group.affectedDuration,
+            samples: group.samples
+        )
+    }
+
+    private static func normalizedReason(_ reason: String) -> String {
+        let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedReason.isEmpty else {
+            return "Classified by local model."
+        }
+
+        guard trimmedReason.count > 120 else {
+            return trimmedReason
+        }
+
+        return String(trimmedReason.prefix(120))
+    }
+}
+
+private struct OllamaGenerateRequest: Encodable {
+    var model: String
+    var prompt: String
+    var stream: Bool
+    var format: OllamaReviewResponseFormat
+    var think: Bool
+    var options: OllamaGenerateOptions
+}
+
+private struct OllamaGenerateOptions: Encodable {
+    var temperature: Double
+}
+
+private struct OllamaGenerateResponse: Decodable {
+    var response: String
+    var thinking: String?
+}
+
+private struct OllamaReviewResponseFormat: Encodable {
+    var type = "object"
+    var properties = OllamaReviewResponseProperties()
+    var required = ["suggestions"]
+}
+
+private struct OllamaReviewResponseProperties: Encodable {
+    var suggestions = OllamaArraySchema()
+}
+
+private struct OllamaArraySchema: Encodable {
+    var type = "array"
+    var items = OllamaSuggestionSchema()
+}
+
+private struct OllamaSuggestionSchema: Encodable {
+    var type = "object"
+    var properties = OllamaSuggestionProperties()
+    var required = ["groupID", "kind", "confidence", "reason"]
+}
+
+private struct OllamaSuggestionProperties: Encodable {
+    var groupID = OllamaStringSchema()
+    var kind = OllamaKindSchema()
+    var confidence = OllamaNumberSchema(minimum: 0, maximum: 1)
+    var reason = OllamaStringSchema()
+}
+
+private struct OllamaStringSchema: Encodable {
+    var type = "string"
+}
+
+private struct OllamaKindSchema: Encodable {
+    var type = "string"
+    var values = ["work", "personal", "ignored", "unsure"]
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case values = "enum"
+    }
+}
+
+private struct OllamaNumberSchema: Encodable {
+    var type = "number"
+    var minimum: Double
+    var maximum: Double
+}
+
+private struct OllamaReviewPromptPayload: Encodable {
+    var groups: [OllamaReviewPromptGroup]
+}
+
+private struct OllamaReviewPromptGroup: Encodable {
+    var groupID: String
+    var ruleField: String
+    var ruleOperation: String
+    var ruleValue: String
+    var affectedCount: Int
+    var affectedMinutes: Int
+    var samples: [OllamaReviewPromptSample]
+}
+
+private struct OllamaReviewPromptSample: Encodable {
+    var appName: String
+    var bundleIdentifier: String
+    var windowTitle: String
+    var url: String?
+}
+
+private struct OllamaReviewModelResponse: Decodable {
+    var suggestions: [OllamaReviewModelSuggestion]
+}
+
+private struct OllamaReviewModelSuggestion: Decodable {
+    var groupID: String
+    var kind: String
+    var confidence: Double
+    var reason: String
 }
 
 public struct LocalReviewAISuggestionProvider: ReviewAISuggestionProviding {

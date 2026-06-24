@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import WorklogCore
+@testable import WorklogCore
 
 @Suite
 struct ReviewAISuggestionTests {
@@ -158,6 +158,69 @@ struct ReviewAISuggestionTests {
         #expect(suggestions.first?.kind == .work)
         #expect(suggestions.first?.proposedRuleCondition?.value == "github.com")
         #expect(suggestions.contains { $0.kind == .unsure })
+    }
+
+    @Test
+    func providerConfigurationDefaultsToOllama() throws {
+        let configuration = ReviewAISuggestionProviderConfiguration(environment: [:])
+
+        guard case .ollama(let endpoint, let model) = configuration else {
+            Issue.record("Expected Ollama provider configuration")
+            return
+        }
+
+        #expect(endpoint == URL(string: "http://localhost:11434/api/generate"))
+        #expect(model == "qwen3:4b")
+    }
+
+    @Test
+    func providerConfigurationKeepsLocalHeuristicOverride() {
+        let configuration = ReviewAISuggestionProviderConfiguration(
+            environment: ["WORKLOG_REVIEW_AI_PROVIDER": "local"]
+        )
+
+        #expect(configuration == .localHeuristic)
+    }
+
+    @Test
+    func ollamaMapperPreservesAppRuleConditions() throws {
+        let request = ReviewAISuggestionRequest(
+            reviewSegments: [
+                classifiedSegment(url: "https://amazon.ae/ref=nav_logo"),
+                classifiedSegment(url: "https://github.com/0xIvan/WorkLog", offset: 120)
+            ]
+        )
+        let amazonID = try #require(request.groups.first { $0.proposedRuleCondition.value == "amazon.ae" }?.id)
+        let githubID = try #require(request.groups.first { $0.proposedRuleCondition.value == "github.com" }?.id)
+        let response = """
+        {
+          "suggestions": [
+            {
+              "groupID": "\(amazonID)",
+              "kind": "personal",
+              "confidence": 0.91,
+              "reason": "Shopping site for consumer purchases."
+            },
+            {
+              "groupID": "\(githubID)",
+              "kind": "work",
+              "confidence": 0.95,
+              "reason": "Software development repository."
+            }
+          ]
+        }
+        """
+
+        let suggestions = try OllamaReviewAISuggestionMapper.suggestions(from: response, for: request)
+        let amazonSuggestion = try #require(suggestions.first { $0.id == amazonID })
+        let githubSuggestion = try #require(suggestions.first { $0.id == githubID })
+
+        #expect(amazonSuggestion.kind == .personal)
+        #expect(amazonSuggestion.proposedRuleCondition?.field == .host)
+        #expect(amazonSuggestion.proposedRuleCondition?.value == "amazon.ae")
+        #expect(githubSuggestion.kind == .work)
+        #expect(githubSuggestion.proposedRuleCondition?.field == .host)
+        #expect(githubSuggestion.proposedRuleCondition?.value == "github.com")
     }
 
     private func makeStore() throws -> WorklogStore {
