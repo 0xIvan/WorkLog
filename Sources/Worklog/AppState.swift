@@ -432,7 +432,6 @@ final class AppState: ObservableObject {
         do {
             try store?.save(segment: segment, classification: classification)
             try refresh()
-            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
