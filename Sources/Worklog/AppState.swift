@@ -265,11 +265,12 @@ final class AppState: ObservableObject {
 
     func applyReviewAISuggestion(_ suggestion: ReviewAISuggestion) {
         do {
-            if try store?.applyReviewAISuggestion(suggestion) != nil {
-                try refresh()
-            }
+            reviewAIRevision += 1
+            _ = try store?.applyReviewAISuggestion(suggestion)
+            try refresh()
+            pruneReviewAISuggestionsForCurrentBacklog()
+            reviewAIAnalysisState = .completed
 
-            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -342,6 +343,13 @@ final class AppState: ObservableObject {
         reviewAIRevision += 1
         reviewAISuggestions = []
         reviewAIAnalysisState = .idle
+    }
+
+    private func pruneReviewAISuggestionsForCurrentBacklog() {
+        let currentGroupIDs = Set(ReviewAISuggestionRequest(reviewSegments: reviewSegments).groups.map(\.id))
+        reviewAISuggestions = reviewAISuggestions.filter { suggestion in
+            currentGroupIDs.contains(suggestion.id)
+        }
     }
 
     private func hideFromDockIfNoWindowsAreOpen() {
