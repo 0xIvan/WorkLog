@@ -161,6 +161,46 @@ struct ReviewAISuggestionTests {
     }
 
     @Test
+    func localProviderTreatsTravelAsPersonal() async throws {
+        let request = ReviewAISuggestionRequest(
+            reviewSegments: [
+                classifiedSegment(
+                    windowTitle: "Manage a booking | Emirates",
+                    url: "https://fly3.emirates.com/manage-booking"
+                )
+            ]
+        )
+
+        let suggestion = try #require(try await LocalReviewAISuggestionProvider().suggestions(for: request).first)
+
+        #expect(suggestion.kind == .personal)
+        #expect(suggestion.reason == "Matched local personal signal 'emirates'.")
+    }
+
+    @Test
+    func ollamaProviderSkipsModelForLocalSignals() async throws {
+        let request = ReviewAISuggestionRequest(
+            reviewSegments: [
+                classifiedSegment(url: "https://github.com/0xIvan/WorkLog"),
+                classifiedSegment(
+                    windowTitle: "Manage a booking | Emirates",
+                    url: "https://fly3.emirates.com/manage-booking",
+                    offset: 120
+                )
+            ]
+        )
+        let provider = OllamaReviewAISuggestionProvider(
+            endpoint: URL(string: "http://127.0.0.1:1/api/generate")!,
+            model: "unavailable"
+        )
+
+        let suggestions = try await provider.suggestions(for: request)
+
+        #expect(suggestions.contains { $0.kind == .work && $0.proposedRuleCondition?.value == "github.com" })
+        #expect(suggestions.contains { $0.kind == .personal && $0.proposedRuleCondition?.value == "fly3.emirates.com" })
+    }
+
+    @Test
     func providerConfigurationDefaultsToOllama() throws {
         let configuration = ReviewAISuggestionProviderConfiguration(environment: [:])
 
@@ -221,6 +261,37 @@ struct ReviewAISuggestionTests {
         #expect(githubSuggestion.kind == .work)
         #expect(githubSuggestion.proposedRuleCondition?.field == .host)
         #expect(githubSuggestion.proposedRuleCondition?.value == "github.com")
+    }
+
+    @Test
+    func ollamaMapperCorrectsTravelWorkSuggestionToPersonal() throws {
+        let request = ReviewAISuggestionRequest(
+            reviewSegments: [
+                classifiedSegment(
+                    windowTitle: "Manage a booking | Emirates",
+                    url: "https://fly3.emirates.com/manage-booking"
+                )
+            ]
+        )
+        let emiratesID = try #require(request.groups.first?.id)
+        let response = """
+        {
+          "suggestions": [
+            {
+              "groupID": "\(emiratesID)",
+              "kind": "work",
+              "confidence": 0.95,
+              "reason": "Emirates booking management - work"
+            }
+          ]
+        }
+        """
+
+        let suggestion = try #require(try OllamaReviewAISuggestionMapper.suggestions(from: response, for: request).first)
+
+        #expect(suggestion.kind == .personal)
+        #expect(suggestion.confidence == 0.9)
+        #expect(suggestion.reason == "Matched personal travel or consumer signal.")
     }
 
     private func makeStore() throws -> WorklogStore {

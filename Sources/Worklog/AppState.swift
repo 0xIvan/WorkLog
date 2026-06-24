@@ -276,6 +276,12 @@ final class AppState: ObservableObject {
         }
     }
 
+    func applyReviewAISuggestion(_ suggestion: ReviewAISuggestion, as kind: ReviewAISuggestionKind) {
+        var correctedSuggestion = suggestion
+        correctedSuggestion.kind = kind
+        applyReviewAISuggestion(correctedSuggestion)
+    }
+
     func classifySegment(_ segment: ClassifiedSegment, as kind: ActivityKind) {
         let categoryID = categories.first { $0.kind == kind }?.id
 

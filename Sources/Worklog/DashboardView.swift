@@ -77,12 +77,74 @@ private struct OverviewTab: View {
 private struct ReviewTab: View {
     @EnvironmentObject private var appState: AppState
     private let formatter = TimeFormatting()
-    private let suggestionValidator = ReviewAISuggestionValidator()
 
     var body: some View {
         List {
             reviewAISuggestionsSection
+            reviewItemsSection
+        }
+    }
 
+    private var reviewAISuggestionsSection: some View {
+        Section("Suggestions") {
+            HStack {
+                Button {
+                    appState.analyzeReview()
+                } label: {
+                    Label("Analyze Review", systemImage: "sparkles")
+                }
+                .disabled(appState.reviewSegments.isEmpty || appState.reviewAIAnalysisState == .analyzing)
+
+                if appState.reviewAIAnalysisState == .analyzing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer()
+
+                Text("\(appState.reviewSegments.count) items")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 10)
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+
+            switch appState.reviewAIAnalysisState {
+            case .idle:
+                EmptyView()
+            case .analyzing:
+                Text("Analyzing grouped Review activity")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            case .completed:
+                if appState.reviewAISuggestions.isEmpty {
+                    Text("No suggestions")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                }
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            }
+
+            ForEach(appState.reviewAISuggestions) { suggestion in
+                ReviewAISuggestionRow(
+                    suggestion: suggestion,
+                    formattedDuration: formatter.compactDuration(suggestion.affectedDuration)
+                ) { kind in
+                    appState.applyReviewAISuggestion(suggestion, as: kind)
+                }
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            }
+        }
+    }
+
+    private var reviewItemsSection: some View {
+        Section("Review Items") {
             if appState.reviewSegments.isEmpty {
                 Text("No review items")
                     .foregroundStyle(.secondary)
@@ -136,59 +198,7 @@ private struct ReviewTab: View {
                     .buttonStyle(.bordered)
                 }
                 .padding(.vertical, 8)
-            }
-        }
-    }
-
-    private var reviewAISuggestionsSection: some View {
-        Section {
-            HStack {
-                Button {
-                    appState.analyzeReview()
-                } label: {
-                    Label("Analyze Review", systemImage: "sparkles")
-                }
-                .disabled(appState.reviewSegments.isEmpty || appState.reviewAIAnalysisState == .analyzing)
-
-                if appState.reviewAIAnalysisState == .analyzing {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-                Spacer()
-
-                Text("\(appState.reviewSegments.count) items")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            switch appState.reviewAIAnalysisState {
-            case .idle:
-                EmptyView()
-            case .analyzing:
-                Text("Analyzing grouped Review activity")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .completed:
-                if appState.reviewAISuggestions.isEmpty {
-                    Text("No suggestions")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            case .failed(let message):
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            ForEach(appState.reviewAISuggestions) { suggestion in
-                ReviewAISuggestionRow(
-                    suggestion: suggestion,
-                    validation: suggestionValidator.validationResult(for: suggestion),
-                    formattedDuration: formatter.compactDuration(suggestion.affectedDuration)
-                ) {
-                    appState.applyReviewAISuggestion(suggestion)
-                }
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
             }
         }
     }
@@ -196,15 +206,16 @@ private struct ReviewTab: View {
 
 private struct ReviewAISuggestionRow: View {
     let suggestion: ReviewAISuggestion
-    let validation: ReviewAISuggestionValidationResult
     let formattedDuration: String
-    let apply: () -> Void
+    let apply: (ReviewAISuggestionKind) -> Void
+
+    private let validator = ReviewAISuggestionValidator()
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
-                    Label(suggestion.kind.displayName, systemImage: symbolName)
+                    Label("Suggested \(suggestion.kind.displayName)", systemImage: symbolName)
                         .foregroundStyle(color)
                     Text("\(Int(round(suggestion.confidence * 100)))%")
                         .font(.caption.monospacedDigit())
@@ -239,21 +250,69 @@ private struct ReviewAISuggestionRow: View {
 
             Spacer()
 
-            if validation.canApply {
-                Button("Apply", action: apply)
-                    .buttonStyle(.borderedProminent)
-            } else if let message = validationMessage {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-                    .frame(maxWidth: 140, alignment: .trailing)
+            VStack(alignment: .trailing, spacing: 8) {
+                HStack(spacing: 8) {
+                    Button {
+                        apply(.work)
+                    } label: {
+                        Label("Work", systemImage: "briefcase")
+                    }
+                    .disabled(!canApply(.work))
+
+                    Button {
+                        apply(.personal)
+                    } label: {
+                        Label("Personal", systemImage: "person")
+                    }
+                    .disabled(!canApply(.personal))
+                }
+                .buttonStyle(.bordered)
+
+                if let message = validationMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: 180, alignment: .trailing)
+                }
             }
         }
         .padding(.vertical, 6)
     }
 
+    private func canApply(_ kind: ReviewAISuggestionKind) -> Bool {
+        validation(for: kind).canApply
+    }
+
+    private func validation(for kind: ReviewAISuggestionKind) -> ReviewAISuggestionValidationResult {
+        var correctedSuggestion = suggestion
+        correctedSuggestion.kind = kind
+        return validator.validationResult(for: correctedSuggestion)
+    }
+
     private var validationMessage: String? {
+        if suggestion.kind == .ignored {
+            return "Ignored suggestions stay manual-only."
+        }
+
+        if suggestion.kind == .unsure {
+            return "Choose Work or Personal to apply."
+        }
+
+        let workValidation = validation(for: .work)
+        let personalValidation = validation(for: .personal)
+        guard !workValidation.canApply, !personalValidation.canApply else {
+            return nil
+        }
+
+        if let message = validationMessage(for: workValidation) {
+            return message
+        }
+
+        return validationMessage(for: personalValidation)
+    }
+
+    private func validationMessage(for validation: ReviewAISuggestionValidationResult) -> String? {
         switch validation {
         case .applyAllowed:
             nil

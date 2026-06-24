@@ -223,6 +223,29 @@ public struct OllamaReviewAISuggestionProvider: ReviewAISuggestionProviding {
             return []
         }
 
+        let localSuggestions = try await LocalReviewAISuggestionProvider().suggestions(for: request)
+        let localSuggestionsByID = Dictionary(
+            localSuggestions.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let modelGroups = request.groups.filter { group in
+            localSuggestionsByID[group.id]?.kind == .unsure
+        }
+
+        guard !modelGroups.isEmpty else {
+            return sorted(localSuggestions)
+        }
+
+        let modelSuggestions = try await modelSuggestions(for: ReviewAISuggestionRequest(groups: modelGroups))
+        let modelSuggestionIDs = Set(modelSuggestions.map(\.id))
+        let retainedLocalSuggestions = localSuggestions.filter { suggestion in
+            suggestion.kind != .unsure && !modelSuggestionIDs.contains(suggestion.id)
+        }
+
+        return sorted(retainedLocalSuggestions + modelSuggestions)
+    }
+
+    private func modelSuggestions(for request: ReviewAISuggestionRequest) async throws -> [ReviewAISuggestion] {
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = 120
@@ -265,6 +288,24 @@ public struct OllamaReviewAISuggestionProvider: ReviewAISuggestionProviding {
         return try OllamaReviewAISuggestionMapper.suggestions(from: responseText, for: request)
     }
 
+    private func sorted(_ suggestions: [ReviewAISuggestion]) -> [ReviewAISuggestion] {
+        suggestions.sorted { first, second in
+            if first.kind == .unsure, second.kind != .unsure {
+                return false
+            }
+
+            if first.kind != .unsure, second.kind == .unsure {
+                return true
+            }
+
+            if first.confidence == second.confidence {
+                return first.affectedDuration > second.affectedDuration
+            }
+
+            return first.confidence > second.confidence
+        }
+    }
+
     private func prompt(for request: ReviewAISuggestionRequest) throws -> String {
         let payload = OllamaReviewPromptPayload(
             groups: request.groups.map { group in
@@ -298,6 +339,7 @@ public struct OllamaReviewAISuggestionProvider: ReviewAISuggestionProviding {
         Personal means consumer shopping, entertainment, social media, news, personal finance, travel, or other non-work activity.
         Use ignored only for OS noise, extensions, blank pages, login windows, or tracking artifacts.
         Treat consumer ecommerce sites such as Amazon as personal unless the evidence clearly shows business procurement.
+        Treat airline, hotel, booking, loyalty, mileage, and travel-management pages as personal unless the title explicitly shows company travel administration.
         Use unsure when the evidence is weak or ambiguous.
         Use confidence from 0.0 to 1.0.
         Keep reason under 120 characters.
@@ -353,11 +395,23 @@ struct OllamaReviewAISuggestionMapper {
                 )
             }
 
+            let kind = ReviewAISuggestionKind(rawValue: modelSuggestion.kind.lowercased()) ?? .unsure
+            let confidence = min(max(modelSuggestion.confidence, 0), 1)
+            let reason = normalizedReason(modelSuggestion.reason)
+            if kind == .work, personalGuardrailMatch(for: group) {
+                return suggestion(
+                    for: group,
+                    kind: .personal,
+                    confidence: min(confidence, 0.9),
+                    reason: "Matched personal travel or consumer signal."
+                )
+            }
+
             return suggestion(
                 for: group,
-                kind: ReviewAISuggestionKind(rawValue: modelSuggestion.kind.lowercased()) ?? .unsure,
-                confidence: min(max(modelSuggestion.confidence, 0), 1),
-                reason: normalizedReason(modelSuggestion.reason)
+                kind: kind,
+                confidence: confidence,
+                reason: reason
             )
         }
         .sorted { first, second in
@@ -406,6 +460,44 @@ struct OllamaReviewAISuggestionMapper {
         }
 
         return String(trimmedReason.prefix(120))
+    }
+
+    private static func personalGuardrailMatch(for group: ReviewAISuggestionGroup) -> Bool {
+        let searchableText = searchableText(for: group)
+        return personalGuardrailMarkers.contains { marker in
+            searchableText.contains(marker)
+        }
+    }
+
+    private static func searchableText(for group: ReviewAISuggestionGroup) -> String {
+        let sampleText = group.samples
+            .flatMap { sample in
+                [
+                    sample.appName,
+                    sample.bundleIdentifier,
+                    sample.windowTitle,
+                    sample.url ?? ""
+                ]
+            }
+            .joined(separator: " ")
+
+        return "\(group.proposedRuleCondition.value) \(sampleText)"
+            .lowercased()
+    }
+
+    private static var personalGuardrailMarkers: [String] {
+        [
+            "amazon",
+            "shopping",
+            "emirates",
+            "airline",
+            "flight",
+            "booking",
+            "skywards",
+            "hotel",
+            "marriott",
+            "travel"
+        ]
     }
 }
 
@@ -554,21 +646,21 @@ public struct LocalReviewAISuggestionProvider: ReviewAISuggestionProviding {
             )
         }
 
-        if let marker = firstMatch(in: searchableText, markers: workMarkers) {
-            return suggestion(
-                for: group,
-                kind: .work,
-                confidence: 0.82,
-                reason: "Matched local work signal '\(marker)'."
-            )
-        }
-
         if let marker = firstMatch(in: searchableText, markers: personalMarkers) {
             return suggestion(
                 for: group,
                 kind: .personal,
                 confidence: 0.82,
                 reason: "Matched local personal signal '\(marker)'."
+            )
+        }
+
+        if let marker = firstMatch(in: searchableText, markers: workMarkers) {
+            return suggestion(
+                for: group,
+                kind: .work,
+                confidence: 0.82,
+                reason: "Matched local work signal '\(marker)'."
             )
         }
 
@@ -639,7 +731,17 @@ public struct LocalReviewAISuggestionProvider: ReviewAISuggestionProviding {
             "spotify",
             "twitter",
             "x.com",
-            "calendar.notion.so"
+            "calendar.notion.so",
+            "amazon",
+            "shopping",
+            "emirates",
+            "airline",
+            "flight",
+            "booking",
+            "skywards",
+            "hotel",
+            "marriott",
+            "travel"
         ]
     }
 
