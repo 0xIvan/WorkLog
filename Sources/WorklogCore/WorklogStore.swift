@@ -418,6 +418,33 @@ public final class WorklogStore {
         }
     }
 
+    @discardableResult
+    public func applyReviewAISuggestion(_ suggestion: ReviewAISuggestion) throws -> UUID? {
+        guard ReviewAISuggestionValidator().validationResult(for: suggestion).canApply,
+              let condition = suggestion.proposedRuleCondition,
+              let kind = suggestion.kind.activityKind else {
+            return nil
+        }
+
+        guard try hasCurrentReviewMatch(for: condition) else {
+            return nil
+        }
+
+        let categoryID = try loadCategories().first { $0.kind == kind }?.id
+        let rule = Rule(
+            name: "Remember \(condition.value)",
+            priority: 150,
+            enabled: true,
+            isBuiltIn: false,
+            action: RuleAction(kind: kind, categoryID: categoryID, projectID: nil),
+            conditions: [condition]
+        )
+        let ruleID = try saveRememberedRule(rule)
+        try reclassify(ruleID: ruleID, scope: .allHistory)
+
+        return ruleID
+    }
+
     public func daySummary(for date: Date) throws -> DaySummary {
         let interval = dayInterval(for: date)
         let segments = try classifiedSegments(startingAt: interval.start, endingBefore: interval.end)
@@ -927,6 +954,39 @@ public final class WorklogStore {
 
     private func reclassificationCandidates(matching rule: Rule, startDate: Date?) throws -> [ReclassificationCandidate] {
         try reclassificationCandidates(startDate: startDate, predicate: reclassificationPredicate(for: rule))
+    }
+
+    private func hasCurrentReviewMatch(for condition: RuleCondition) throws -> Bool {
+        let rule = Rule(
+            name: "Review AI freshness check",
+            priority: 150,
+            enabled: true,
+            isBuiltIn: false,
+            action: RuleAction(kind: .review, categoryID: nil, projectID: nil),
+            conditions: [condition]
+        )
+
+        guard let predicate = reclassificationPredicate(for: rule) else {
+            return false
+        }
+
+        var bindings = predicate.bindings
+        bindings.append(.text(ActivityKind.review.rawValue))
+
+        let indexHint = predicate.indexName.map { "INDEXED BY \($0)" } ?? ""
+        return try query(
+            """
+            SELECT 1
+            FROM activity_segments AS s \(indexHint)
+            JOIN classifications c ON c.segment_id = s.id
+            WHERE \(predicate.sql) AND c.kind = ?
+            LIMIT 1
+            """,
+            bindings: bindings
+        ) { _ in
+            true
+        }
+        .first ?? false
     }
 
     private func reclassificationCandidates(

@@ -76,9 +76,13 @@ private struct OverviewTab: View {
 
 private struct ReviewTab: View {
     @EnvironmentObject private var appState: AppState
+    private let formatter = TimeFormatting()
+    private let suggestionValidator = ReviewAISuggestionValidator()
 
     var body: some View {
         List {
+            reviewAISuggestionsSection
+
             if appState.reviewSegments.isEmpty {
                 Text("No review items")
                     .foregroundStyle(.secondary)
@@ -133,6 +137,154 @@ private struct ReviewTab: View {
                 }
                 .padding(.vertical, 8)
             }
+        }
+    }
+
+    private var reviewAISuggestionsSection: some View {
+        Section {
+            HStack {
+                Button {
+                    appState.analyzeReview()
+                } label: {
+                    Label("Analyze Review", systemImage: "sparkles")
+                }
+                .disabled(appState.reviewSegments.isEmpty || appState.reviewAIAnalysisState == .analyzing)
+
+                if appState.reviewAIAnalysisState == .analyzing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer()
+
+                Text("\(appState.reviewSegments.count) items")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            switch appState.reviewAIAnalysisState {
+            case .idle:
+                EmptyView()
+            case .analyzing:
+                Text("Analyzing grouped Review activity")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .completed:
+                if appState.reviewAISuggestions.isEmpty {
+                    Text("No suggestions")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            ForEach(appState.reviewAISuggestions) { suggestion in
+                ReviewAISuggestionRow(
+                    suggestion: suggestion,
+                    validation: suggestionValidator.validationResult(for: suggestion),
+                    formattedDuration: formatter.compactDuration(suggestion.affectedDuration)
+                ) {
+                    appState.applyReviewAISuggestion(suggestion)
+                }
+            }
+        }
+    }
+}
+
+private struct ReviewAISuggestionRow: View {
+    let suggestion: ReviewAISuggestion
+    let validation: ReviewAISuggestionValidationResult
+    let formattedDuration: String
+    let apply: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Label(suggestion.kind.displayName, systemImage: symbolName)
+                        .foregroundStyle(color)
+                    Text("\(Int(round(suggestion.confidence * 100)))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text("\(suggestion.affectedCount) items")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(formattedDuration)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                if let condition = suggestion.proposedRuleCondition {
+                    Text("\(condition.field.displayName) \(condition.operation.displayName) \(condition.value)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Text(suggestion.reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                if let sample = suggestion.samples.first {
+                    Text(sample.windowTitle.isEmpty ? sample.appName : sample.windowTitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if validation.canApply {
+                Button("Apply", action: apply)
+                    .buttonStyle(.borderedProminent)
+            } else if let message = validationMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 140, alignment: .trailing)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var validationMessage: String? {
+        switch validation {
+        case .applyAllowed:
+            nil
+        case .manualOnly(let message), .rejected(let message):
+            message
+        }
+    }
+
+    private var symbolName: String {
+        switch suggestion.kind {
+        case .work:
+            "briefcase"
+        case .personal:
+            "person"
+        case .ignored:
+            "eye.slash"
+        case .unsure:
+            "questionmark.circle"
+        }
+    }
+
+    private var color: Color {
+        switch suggestion.kind {
+        case .work:
+            .blue
+        case .personal:
+            .green
+        case .ignored:
+            .gray
+        case .unsure:
+            .orange
         }
     }
 }

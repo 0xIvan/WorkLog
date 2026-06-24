@@ -12,6 +12,8 @@ final class AppState: ObservableObject {
     @Published var todaySummary = DaySummary.empty(on: Date())
     @Published var weekSummary: [WeekDaySummary] = []
     @Published var reviewSegments: [ClassifiedSegment] = []
+    @Published var reviewAISuggestions: [ReviewAISuggestion] = []
+    @Published var reviewAIAnalysisState = ReviewAIAnalysisState.idle
     @Published var recentSegments: [ClassifiedSegment] = []
     @Published var activityDate = Date()
     @Published var activitySegments: [ClassifiedSegment] = []
@@ -26,17 +28,21 @@ final class AppState: ObservableObject {
     private let idleMonitor = IdleMonitor()
     private let classifier = ActivityClassifier()
     private let rememberedRuleFactory = RememberedRuleFactory()
+    private let reviewAISuggestionProvider: any ReviewAISuggestionProviding
     private let formatter = TimeFormatting()
     private var store: WorklogStore?
     private var timer: Timer?
     private var activeDraft: ActiveDraft?
     private var visibleAppWindows: Set<String> = []
     private var dashboardWindow: NSWindow?
+    private var reviewAIRevision = 0
     private let pollInterval: TimeInterval = 5
     private let minimumSegmentDuration: TimeInterval = 3
     private let idleThreshold: TimeInterval = 300
 
-    init() {
+    init(reviewAISuggestionProvider: any ReviewAISuggestionProviding = ReviewAISuggestionProviderFactory.makeProvider()) {
+        self.reviewAISuggestionProvider = reviewAISuggestionProvider
+
         do {
             let databaseURL = try WorklogStore.defaultDatabaseURL()
             store = try WorklogStore(databaseURL: databaseURL)
@@ -142,6 +148,7 @@ final class AppState: ObservableObject {
     func reload() {
         do {
             try refresh()
+            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -155,6 +162,7 @@ final class AppState: ObservableObject {
                 try store?.reclassify(scope: scope)
             }
             try refresh()
+            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -168,6 +176,7 @@ final class AppState: ObservableObject {
                 try store?.reclassify(scope: scope)
             }
             try refresh()
+            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -222,6 +231,51 @@ final class AppState: ObservableObject {
         }
     }
 
+    func analyzeReview() {
+        guard !reviewSegments.isEmpty else {
+            reviewAISuggestions = []
+            reviewAIAnalysisState = .completed
+            return
+        }
+
+        reviewAIAnalysisState = .analyzing
+        let request = ReviewAISuggestionRequest(reviewSegments: reviewSegments)
+        let revision = reviewAIRevision
+
+        Task { @MainActor in
+            do {
+                let suggestions = try await reviewAISuggestionProvider.suggestions(for: request)
+                guard revision == reviewAIRevision else {
+                    return
+                }
+
+                reviewAISuggestions = suggestions
+                reviewAIAnalysisState = .completed
+                errorMessage = nil
+            } catch {
+                guard revision == reviewAIRevision else {
+                    return
+                }
+
+                reviewAIAnalysisState = .failed(error.localizedDescription)
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func applyReviewAISuggestion(_ suggestion: ReviewAISuggestion) {
+        do {
+            if try store?.applyReviewAISuggestion(suggestion) != nil {
+                try refresh()
+            }
+
+            clearReviewAISuggestions()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func classifySegment(_ segment: ClassifiedSegment, as kind: ActivityKind) {
         let categoryID = categories.first { $0.kind == kind }?.id
 
@@ -244,6 +298,7 @@ final class AppState: ObservableObject {
             }
 
             try refresh()
+            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -270,10 +325,17 @@ final class AppState: ObservableObject {
             }
 
             try refresh()
+            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func clearReviewAISuggestions() {
+        reviewAIRevision += 1
+        reviewAISuggestions = []
+        reviewAIAnalysisState = .idle
     }
 
     private func hideFromDockIfNoWindowsAreOpen() {
@@ -370,11 +432,19 @@ final class AppState: ObservableObject {
         do {
             try store?.save(segment: segment, classification: classification)
             try refresh()
+            clearReviewAISuggestions()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+enum ReviewAIAnalysisState: Equatable {
+    case idle
+    case analyzing
+    case completed
+    case failed(String)
 }
 
 private struct ActiveDraft {
